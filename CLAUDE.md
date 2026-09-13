@@ -109,6 +109,16 @@ work in this one.
   content — avoid `api.github.com` (60 req/hr unauthenticated limit). To
   confirm commits landed, re-clone with `git clone --depth 1` rather than
   relying on `git pull`.
+- **No PII or secrets in git, ever (added 13 Sep 2026).** This repo is
+  public. Before staging anything — especially a broad `git add`, a new
+  untracked file, or any file whose contents Claude hasn't actually
+  read — check its contents for API keys/tokens, credentials, real
+  personal data (names, emails, phone numbers tied to real people), or
+  any other sensitive value. Never commit a real `.env`; only
+  `.env.example` with blank/placeholder values. If something sensitive is
+  found staged or already committed, stop and flag it to Pratham rather
+  than silently fixing or force-pushing over it — history rewrites need
+  his explicit call.
 
 ## Known open question — RESOLVED 13 Sep 2026
 Was: whether `eval-harness`'s stricter commit-workflow rule (give commands
