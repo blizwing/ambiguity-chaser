@@ -1,0 +1,12 @@
+# Virtual Environment
+.venv/
+
+# Environment Variables
+.env
+
+# Python Cache
+*.pyc
+__pycache__/
+
+# Claude Code local config/skills
+.claude/
