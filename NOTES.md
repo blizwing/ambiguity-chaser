@@ -138,3 +138,85 @@ node, planned for later today.
 
 **Raw files:** `scratch/scratch_graph.py` (committed in two steps: single-
 node version, then the two-node version).
+
+---
+
+## Week 7 — Port Phase 1 prompt into a single-node graph (21 Sep 2026)
+
+**Goal:** the actual ROADMAP.md Week 7 task — replace the toy `shout`/
+`exclaim` workers with one real node that calls DeepSeek using
+eval-harness's Phase 1 test-case-generation prompt and returns a validated
+structured spec.
+
+**Done:**
+- Ported three pieces from `eval-harness`, minimal-only (no redesign, per
+  ROADMAP's own red flag against reaching back into eval-harness to
+  rebuild something already decided there):
+  - `llm_client.py` — from `Day1_first_call.py` / `Day4_json_mode.py`.
+    Only the OpenAI-schema JSON-mode call path is ported; the
+    Anthropic-schema path isn't, since this repo only ever talks to
+    DeepSeek via the `openai` SDK (confirmed 14 Sep prep). Requests
+    `deepseek-flash` explicitly, not the deprecated `deepseek-chat` alias.
+  - `schemas.py` — just `TestCase` and `validate_response`, not
+    eval-harness's full model zoo.
+  - `prompts/testcase_v1.txt` — verbatim copy of
+    `Day7_prompt_file/prompt_testcase_v1.txt`.
+- Caught mid-build: a fresh file was created at `Progress/Day1_Init/Day1.py`
+  — day-numbered, exactly the naming pattern CLAUDE.md says this repo
+  deliberately avoids. Moved to `graph.py` at repo root before writing any
+  real code into it.
+- Built `graph.py`: `GraphState` (Pydantic `BaseModel`, not `TypedDict` —
+  deliberate choice, since this project can't tolerate silent state drift
+  the way a throwaway script could) with `requirement`, `status`,
+  `test_case` fields; one node, `generate_test_case`, that formats the
+  prompt, calls `call_deepseek_json`, and runs the result through
+  `validate_response`; wired `START -> generate_test_case -> END`.
+- Ran against `"The system must lock a user account after 5 failed login
+  attempts."` — valid `TestCase` came back end-to-end, specific and
+  verifiable (`expected_result`: "After the fifth failed login attempt,
+  the user account is locked.", `priority: high`). Week 7's DONE WHEN met.
+
+**Found — proved the actual gap this project exists to close, on purpose:**
+ran the same graph 5x against a deliberately vague requirement
+(`"The system should be fast."`) before stopping for the day, to see what
+happens without any ambiguity gate:
+- 3/5 calls: valid, and the prompt's own ambiguity rule worked correctly —
+  each one noted the missing speed threshold inside `expected_result`
+  (e.g. "Pass/fail cannot be determined because requirement provides no
+  measurable speed threshold") instead of inventing a fake number.
+- 1/5: `invalid_json` — `stop_reason: length`, `output_tokens: 1024`,
+  response truncated mid-field. Root cause: `MAX_TOKENS = 1024`, ported
+  unchanged from eval-harness's `Day1_first_call.py`, which sized it for a
+  one-line haiku response, not a multi-field JSON object with a written
+  ambiguity explanation. **Fixed same day** — bumped to `MAX_TOKENS = 2048`
+  in `llm_client.py` and reran the same 5-call test: 5/5 valid, all
+  `stop_reason: stop`; one of the five used 1241 output tokens, confirming
+  this wasn't a one-off — it would have truncated under the old cap too.
+- 1/5 (before the fix): `invalid` — well-formed JSON, but the model
+  silently omitted the required `"priority"` field. Not a bug:
+  `validate_response`/Pydantic caught it correctly, exactly the
+  grader-integrity discipline CLAUDE.md calls out as carrying over from
+  P1's `ScoreIntegrityError`.
+- Live confirmation of the P1 "non-determinism at temperature=0" finding:
+  five calls to the identical prompt produced meaningfully different
+  completions (three clean passes, one truncation, one schema miss) —
+  not exact-match-diffable, exactly as CLAUDE.md already warned.
+
+**Why this matters going forward:** `graph.py` as it stands has zero
+ambiguity gating — it emits a `TestCase` for any requirement that happens
+to produce valid, schema-conformant JSON, vague or not. Today's 5-call
+test made that gap concrete rather than theoretical, and incidentally
+surfaced a real config bug (undersized `MAX_TOKENS`) that would have kept
+causing intermittent `invalid_json` failures indistinguishable from a real
+model problem if left at the ported default. Week 8 is the fix for the
+gating gap: score testability first, then conditionally route to either
+this node or an as-yet-unwritten "ask clarifying questions" node — the
+actual differentiator this project exists to build, not yet started.
+
+**Checkpoint met:** Week 7 ROADMAP.md task complete — single-node graph
+running the ported Phase 1 prompt, producing a validated `TestCase` for a
+clear requirement. Deliberately stopped here rather than starting Week 8
+in the same session, per today's plan.
+
+**Raw files:** `llm_client.py`, `schemas.py`, `prompts/testcase_v1.txt`,
+`graph.py` (all new, not yet committed).
