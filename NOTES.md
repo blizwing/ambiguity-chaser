@@ -75,3 +75,66 @@ day-level plan yet — this closes out pre-Saturday prep.
 
 **Raw files:** `.env` (created, gitignored, not committed), scratchpad
 `smoke_test.py` (temporary, not part of the repo).
+
+---
+
+## Week 7 — LangGraph fundamentals, hands-on (21 Sep 2026)
+
+**Goal:** learn LangGraph's node/edge/state mechanics by building, not by
+reading — SESSION 3 (`/advanced-learn` LangGraph fundamentals, scheduled
+Sat 19 Sep) was deliberately skipped in favor of this. Explicit call: go
+hands-on first. This is prep before Week 7's actual task (port the Phase 1
+prompt into a real single-node graph), not that task itself.
+
+**Done:**
+- Confirmed `.venv` already had `langgraph==1.2.11` / `langchain-core==1.6.3`
+  installed from the 14 Sep prep — no new installs needed today.
+- Built `scratch/scratch_graph.py`: a `State` (`TypedDict`, one field
+  `text: str`), one node (`shout` — uppercases `text`), wired
+  `START -> shout -> END` explicitly, compiled, invoked with
+  `{"text": "hello"}` -> `{'text': 'HELLO'}`.
+- Extended to a second node: added `exclaim` (appends `"!"`), rewired the
+  edges to `START -> shout -> exclaim -> END`. Ran end-to-end ->
+  `{'text': 'HELLO!'}`, print statements inside each node confirmed
+  execution order is driven by the declared edges, not by which function
+  happened to be defined or called first in the file.
+- Clarified (own question, worth recording): LangGraph's `State` type is
+  not enforced at runtime when declared as `TypedDict` — it's editor/type-
+  checker-only typing. A node can return any dict shape and LangGraph will
+  merge it into the running state key-by-key with zero validation. Flagged
+  Pydantic `BaseModel` as the enforced alternative to switch to once past
+  toy examples — relevant here specifically because this project's whole
+  premise (score -> emit spec or ask, never fabricate) can't tolerate
+  silent state drift the way a throwaway script could.
+
+**Found:**
+- Real bug, fixed hands-on: `from langgraph import graph` imported the
+  *module* and bound it to the name `graph`; the next line,
+  `graph.StateGraph(State)`, created a `StateGraph` instance but never
+  assigned it to anything, so every later `graph.add_node(...)` /
+  `add_edge(...)` call was hitting the module, not an instance —
+  `AttributeError: module 'langgraph.graph' has no attribute 'add_node'`.
+  Fixed by dropping the module import and assigning
+  `graph = StateGraph(State)`.
+- Pylance briefly reported stale `"graph" is not defined` diagnostics
+  right after that same-session edit, before it re-scanned the saved
+  file — not a real error; running the script directly gave correct
+  output before the warning cleared. Worth remembering next time an edit
+  and a lingering red squiggle disagree.
+
+**Why this matters going forward:** the three fundamentals exercised here
+— state as a shared dict, nodes as functions registered by name, edges as
+declared control flow independent of a function's call site in the
+source — are exactly what Week 8's conditional branching (score -> "emit
+spec" or "ask questions") and Week 9's interrupt/resume build on. Neither
+of those is a plain Python `if/else`; both lean on `add_edge`/`add_node`
+the same way this toy graph did.
+
+**Checkpoint met:** two-node graph runs end-to-end with edge-driven (not
+call-order-driven) execution confirmed via printed intermediate state. No
+formal Week 7 day-level DONE WHEN existed yet for this step — it's the
+hands-on-fundamentals prep before porting the real Phase 1 prompt into a
+node, planned for later today.
+
+**Raw files:** `scratch/scratch_graph.py` (committed in two steps: single-
+node version, then the two-node version).
