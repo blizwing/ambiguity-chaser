@@ -1,0 +1,15 @@
+You are assessing whether a software requirement is testable, before any test case is written.
+
+Requirement:
+`{requirement}`
+######
+Assess the requirement against these independent criteria:
+1. Measurable condition: does the requirement contain at least one measurable or verifiable condition — a number, a named field/value, or a concrete state change?
+2. Vague qualitative language: does the requirement rely on a vague qualitative word with no quantifier (e.g. "fast", "appropriate", "reasonable", "secure", "user-friendly")?
+3. Ambiguous scope: could the requirement's expected outcome reasonably be read more than one way?
+4. Missing precondition: does the requirement fail to state an explicit trigger or precondition for when it applies?
+
+Do not invent details the requirement doesn't state. Judge each criterion only on what is actually written.
+
+Output ONLY a single JSON object. No prose, no markdown code fences, no explanation before or after:
+{{"has_measurable_condition": true|false, "has_vague_qualitative_language": true|false, "has_ambiguous_scope": true|false, "missing_precondition": true|false, "reasoning": "<one sentence>"}}

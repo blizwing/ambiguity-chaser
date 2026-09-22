@@ -1,0 +1,11 @@
+You are a QA analyst. The following software requirement was scored too ambiguous to write a concrete test case for.
+
+Requirement:
+`{requirement}`
+
+Known issues with this requirement: {issues}
+######
+Write the specific clarifying questions a QA engineer would need answered before this requirement could be tested. Ask only about what's actually missing or ambiguous, based on the known issues above — do not ask generic questions unrelated to them. Do not propose answers or invent example values.
+
+Output ONLY a single JSON object. No prose, no markdown code fences, no explanation before or after:
+{{"questions": ["<question 1>", "<question 2>"], "reasoning": "<one sentence on why these questions are needed>"}}
