@@ -220,3 +220,114 @@ in the same session, per today's plan.
 
 **Raw files:** `llm_client.py`, `schemas.py`, `prompts/testcase_v1.txt`,
 `graph.py` (all new, not yet committed).
+
+---
+
+## Week 8 — Conditional edges: score testability, then route (22 Sep 2026)
+
+**Goal:** the ROADMAP.md Week 8 task — stop unconditionally generating a
+test case for every requirement, vague or not (the gap Week 7 proved
+concrete). Score a requirement's testability first, then conditionally
+route to either `generate_test_case` or a new "ask clarifying questions"
+node, using a real LangGraph conditional edge instead of one fixed path.
+
+**Done:**
+- Checked `eval-harness` first, before designing anything new, per
+  ROADMAP's red flag against rebuilding something already decided there.
+  `JudgeScore` (`eval-harness/schemas.py`) and `judge_v2.txt` looked like a
+  candidate but turned out to score the wrong thing: they judge a
+  *generated test case's* quality against its requirement, after
+  generation — nothing in `eval-harness` scores a raw requirement's
+  testability *before* generation. Not a port candidate. Two things were
+  still worth reusing as patterns, not code: the rubric shape (independent
+  criteria + reasoning, hard criteria vs soft criteria feeding a verdict),
+  and `ScoreIntegrityError`'s discipline of not trusting a grader's own
+  output blindly.
+- Domain call (Pratham's, deduction method): built `TestabilityScore` — 4
+  boolean criteria the model reports as facts about the requirement text
+  (`has_measurable_condition`, `has_vague_qualitative_language`,
+  `has_ambiguous_scope`, `missing_precondition`) plus one-sentence
+  reasoning. `compute_testability_score` in `schemas.py` turns those
+  booleans into a score in Python, not the model: `has_measurable_condition`
+  is a hard gate (fail it, score is 0, nothing else matters — there's
+  nothing to test without at least one verifiable condition); each
+  remaining soft criterion present costs 15 points off a 100 start. Model
+  reports facts, code does the arithmetic — same discipline as
+  `eval-harness`'s `JudgeScore`/`ScoreResult` split, and avoids trusting the
+  model to self-report a number it might just invent a plausible-looking
+  value for.
+- Added `ask_clarifying_questions` node + `prompts/clarifying_questions_v1.txt`
+  — takes the requirement plus a human-readable summary of which criteria
+  failed, asks the model for specific, targeted clarifying questions (no
+  proposed answers, no invented example values). Guards against a
+  technically-valid-but-empty response (`questions: []`) by treating it as
+  invalid rather than trusting it — same grader-integrity discipline as
+  above, applied to this repo's own output this time, not `eval-harness`'s.
+- Wired a real `add_conditional_edges` in `graph.py`:
+  `START -> score_testability -> (generate_test_case | ask_clarifying_questions) -> END`,
+  replacing Week 7's single fixed path.
+- Tested three cases end-to-end: the Week 7 clear requirement (account
+  lockout) scored 100, routed to `generate_test_case`, produced the same
+  quality spec as before. The Week 7 vague requirement ("the system should
+  be fast") hit the hard gate, scored 0, routed to `ask_clarifying_questions`,
+  produced 8 targeted questions instead of any fabricated spec — Week 8's
+  actual DONE WHEN. A deliberately-constructed middle-ground requirement
+  ("must respond in under 2 seconds in most cases") scored 70 (two soft
+  deductions), used to pressure-test the threshold itself.
+
+**Found — two real issues, caught by testing rather than assumed away:**
+- **Threshold boundary bug, self-inflicted and caught same session:** first
+  set `TESTABILITY_THRESHOLD = 70`, saw the middle-ground case pass through
+  to `generate_test_case` despite a genuine ambiguity ("most cases" of
+  what?), and decided the gate should be stricter — zero soft failures
+  tolerated. Raised to 85, but `route_by_testability` checks
+  `score >= TESTABILITY_THRESHOLD`, and one soft failure scores exactly 85
+  — `85 >= 85` is `True`, so 85 still let one soft failure through despite
+  being described (wrongly, in-session) as "zero tolerance." Caught by
+  directly testing the boundary with a synthetic single-soft-failure
+  `TestabilityScore`, not by inspection. Fixed by bumping to
+  `TESTABILITY_THRESHOLD = 86` (comment left in `schemas.py` explaining why
+  86 and not 85) — now only a flawless 100 clears the gate, matching the
+  actual intent.
+- **Non-determinism shows up in the scoring step itself, not just
+  generation:** ran the identical, unchanged clear requirement (account
+  lockout) through the full graph 4 more times after fixing the threshold.
+  3/4 scored 100 as expected; 1/4 scored 85 — the model itself decided,
+  that one run, that the same unchanged text had a soft ambiguity issue it
+  hadn't flagged the other three times. This extends the Week 7 finding
+  (temperature=0 isn't fully deterministic) one layer earlier than already
+  known: it's not just that the generated test case varies run to run, the
+  ambiguity judgment feeding the routing decision varies too. Not fixed
+  today — left as a known limitation, since it can't be eliminated, only
+  mitigated (e.g. a future majority-vote-across-N-calls approach).
+- **Left open, not fixed:** when the scorer's own output fails schema
+  validation, `score_testability` forces the score to 0 (a defensible
+  fail-safe — can't confidently score it, so don't confidently generate a
+  spec either) but that failure gets written to `state.status`, which is
+  then silently overwritten by whichever node runs next. End result: the
+  final output can't distinguish "score is 0 because every criterion
+  genuinely failed" from "the scorer's own response was malformed and this
+  is a forced default." Arguably fine under CLAUDE.md's own rule not to
+  split a status when the caller's handling doesn't differ (both cases
+  route to asking a question either way) — but flagged since it would
+  block ever measuring how often the scorer itself is unreliable versus how
+  often requirements are genuinely bad.
+
+**Why this matters going forward:** Week 8's actual differentiator now
+works — a vague requirement gets a question, not a fabricated spec — but
+the non-determinism finding means the gate isn't a stable, repeatable
+judge yet: the same input can land on either side of the threshold across
+runs. That's worth carrying into whatever comes after Week 8, rather than
+assuming today's single-call scorer is trustworthy as-is. The
+boundary-arithmetic bug is also a good concrete reminder that a threshold
+described in English ("zero tolerance") needs to be checked against the
+actual comparison operator, not just the number.
+
+**Checkpoint met:** Week 8 ROADMAP.md task complete — conditional edge
+actually branches based on a computed score, tested against clear/vague/
+middle-ground requirements, threshold tuned and its boundary bug fixed
+same session.
+
+**Raw files:** `prompts/testability_score_v1.txt`,
+`prompts/clarifying_questions_v1.txt` (new); `schemas.py`, `graph.py`
+(modified, not yet committed).
