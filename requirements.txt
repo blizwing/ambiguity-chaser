@@ -5,4 +5,5 @@ pyyaml
 pydantic
 pytest
 langgraph
+langgraph-checkpoint-sqlite
 langchain-core
