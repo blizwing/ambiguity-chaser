@@ -422,3 +422,53 @@ invocations against a real SQLite-backed checkpointer.
 **Raw files:** `scratch/scratch_interrupt.py` (new); `requirements.txt`
 (added `langgraph-checkpoint-sqlite`); `.gitignore` (added `*.db`) — none
 committed yet.
+
+**Aside — Jev (TypeSafe AI's System One model), flagged for a future
+experiment, not today's work:** came up in conversation, unrelated to the
+interrupt/resume task above. Jev returns typed decisions with calibrated
+probabilities in a single pass (no autoregression) instead of generating
+text — pitched as a fast/cheap complement to an LLM for structured-decision
+steps, not open-ended generation. Architecturally a plausible fit for this
+project's `score_testability` step specifically (a calibrated classification
+decision), not for the generation nodes, which still need a real LLM. Not
+adopting now: cloud-only, closed-weight, ~1 week old early access (released
+15 Sep 2026) with no self-host option and no track record yet — too risky a
+dependency to wire into a public, reproducible repo at this stage. Worth a
+standalone side-experiment sometime (compare it against the current
+DeepSeek-based scorer on the same testability cases), not a replacement
+decision.
+
+**Correction, same day — pricing checked against TypeSafe's own site, not
+a third party:** first pass at this research landed on `jevtypesafeai.com`
+(its own footer: "Independent developer platform. Not affiliated with or
+endorsed by TypeSafe AI") and its playground/pricing pages, which quote
+$0.25-$0.42/M input tokens. Went back and confirmed against `typesafe.ai`
+and `docs.typesafe.ai` directly — the real price is **$42 per billion
+input tokens ($0.042/M)**, output tokens free; the third-party site's
+number is a 6-10x markup, not TypeSafe's actual rate. No dedicated pricing
+page exists in TypeSafe's own docs — the $42/B figure is only on their
+homepage. Also confirmed first-hand: no self-hosting/on-prem docs anywhere
+in TypeSafe's own doc index, so the cloud-only conclusion above holds.
+Lesson for later: check a vendor's own domain before trusting a
+third-party wrapper's numbers, even when that wrapper is the one offering
+the free interactive demo.
+
+**Also found — TypeSafe's own published limitations doc
+(`docs.typesafe.ai/model-jaggedness/jev-1.13.md`), directly relevant to
+whether Jev would actually help here:** nine documented failure modes,
+two matter for this project specifically:
+- **No structural-invariant guarantee** — TypeSafe's own words: logically
+  equivalent questions aren't guaranteed to produce consistent outputs.
+  This is the same non-determinism Week 8 already found in the DeepSeek-
+  based scorer (3/4 scored 100, 1/4 scored 85 on identical input) — so
+  swapping in Jev would make the routing decision faster and cheaper, not
+  more reliable. Changes the framing of the "future experiment" above:
+  it's a speed/cost comparison against the current scorer, not a fix for
+  the reliability gap.
+- **"Jev is not a calculator"** — unreliable at counting/numeric
+  comparison, TypeSafe's own recommendation is to keep arithmetic in code
+  and reserve Jev for genuine judgment calls. Matches this project's
+  existing `compute_testability_score` discipline (model reports boolean
+  facts, code does the scoring arithmetic) — if this experiment ever
+  happens, keep that split rather than asking Jev to return a number
+  directly.
