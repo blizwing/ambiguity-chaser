@@ -10,3 +10,6 @@ __pycache__/
 
 # Claude Code local config/skills
 .claude/
+
+# Local checkpoint DBs (runtime state, not source)
+*.db

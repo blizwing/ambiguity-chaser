@@ -331,3 +331,94 @@ same session.
 **Raw files:** `prompts/testability_score_v1.txt`,
 `prompts/clarifying_questions_v1.txt` (new); `schemas.py`, `graph.py`
 (modified, not yet committed).
+
+---
+
+## Week 9 — Interrupt/resume mechanics, hands-on (23 Sep 2026)
+
+**Goal:** learn LangGraph's pause/persist/resume mechanics by building, not
+by reading — same call as Week 7: go hands-on before Saturday's SESSION 4
+(`/advanced-learn` human-in-the-loop interrupts), rather than starting the
+real `ask_clarifying_questions` interrupt work cold. No day-level
+ROADMAP.md breakdown exists yet for Week 9, so today's DONE WHEN was
+scoped in-session rather than pulled from the file: prove a graph can (1)
+pause at a node without crashing, (2) have that paused state survive being
+picked up by a completely separate process, and (3) resume from that
+separate process with a human-supplied answer and finish correctly.
+
+**The mental model (for future-me, re-reading this cold):** it's an online
+form that saves your progress. You fill in what you can, hit a question it
+can't answer for you, and the site saves everything so far and freezes
+there — no crash, just parked. Close the tab (or lose the whole machine),
+come back later, log in again: it shows you exactly where you left off,
+because that came from its database, not from anything still open in a
+browser tab. Answer the question, hit submit, and it finishes from there.
+`start` = beginning the form. `peek` = opening a new tab later and seeing
+where it's parked. `resume` = typing the answer in and submitting.
+
+**Done:**
+- Installed `langgraph-checkpoint-sqlite` (added to `requirements.txt`),
+  deliberately instead of the simpler in-memory `MemorySaver` — proving
+  "survives a process restart" honestly needs a checkpointer backed by an
+  actual file, not RAM. Added `*.db` to `.gitignore` for the resulting
+  runtime checkpoint file, same treatment as `.env`.
+- Built `scratch/scratch_interrupt.py`: a two-node graph (`ask`, which
+  calls `interrupt()` to pause and surface a question; `finalize`, which
+  runs after) compiled with a `SqliteSaver` checkpointer keyed by a fixed
+  `thread_id`. Three CLI modes: `start` (kick off a run), `peek` (read
+  back current state with no run), `resume` (continue with
+  `Command(resume=answer)`).
+- Ran all three modes as three genuinely separate `python` process
+  invocations, not simulated inside one script — the point was to prove
+  persistence, not just narrate it:
+  - `start`: `ask` ran, hit `interrupt()`, and `.invoke()` returned
+    immediately (no crash, no exception) with an `__interrupt__` key
+    containing the question payload.
+  - `peek`, from a fresh process: `get_state()` returned the exact same
+    `topic`, `next=('ask',)`, and the same pending `Interrupt` — read
+    entirely from disk, with nothing carried over from the first
+    process's memory.
+  - `resume`, from a third fresh process: `Command(resume="apologetic")`
+    completed `ask`, ran `finalize`, and returned the correct final state
+    (`note: "A apologetic note about the Q3 release delay."`).
+- Went one level deeper than the roadmap's own SESSION 4 prompt asked for
+  and actually inspected the SQLite file's raw contents rather than
+  trusting the mechanism as a black box: opened `interrupt_demo.db`
+  directly, found two tables (`checkpoints`, `writes`), and decoded a raw
+  checkpoint blob with LangGraph's own `JsonPlusSerializer` back into a
+  Python dict to confirm what's actually on disk — a chain of full-state
+  snapshots (each row's `parent_checkpoint_id` pointing at the previous
+  one), with the pending interrupt stored as a separate row under a
+  `__interrupt__` channel rather than inside the snapshot itself.
+
+**Found:** on resume, LangGraph re-runs the interrupted node **from its
+start**, not from the `interrupt()` call itself — confirmed by the `[ask]
+node running, about to interrupt` print firing a second time on the
+`resume` invocation, before the resume value was returned. `interrupt()`
+only changes behavior the second time through: instead of pausing again,
+it returns the human's answer and lets the function continue. Real design
+constraint for the actual `ask_clarifying_questions` node once this is
+wired in for real: any code placed *before* the `interrupt()` call inside
+a node will execute again on every resume, so it needs to be safe to
+repeat (or split into an earlier node that isn't itself interrupted).
+
+**Why this matters going forward:** `ask_clarifying_questions` in the real
+`graph.py` currently generates questions and the graph just ends — there's
+no way to actually hand it a human's answer and have it continue; it's a
+dead end, not a pause. Week 9's real task is adding `interrupt()` inside
+(or right after) that node, compiling with a checkpointer, and giving each
+requirement a `thread_id` (likely the requirement's own id) so "score ->
+ask -> *(human answers, possibly hours later)* -> resume -> generate real
+spec" becomes one continuous graph run instead of two disconnected halves.
+The re-run-from-the-top behavior found today needs to be designed around
+before that node calls the LLM for anything ahead of its `interrupt()`
+call.
+
+**Checkpoint met:** today's scoped goal (hands-on interrupt/persist/resume
+prep, not the full Week 9 ROADMAP task) — pause, cross-process persistence,
+and resume-with-answer all proven with three genuinely separate process
+invocations against a real SQLite-backed checkpointer.
+
+**Raw files:** `scratch/scratch_interrupt.py` (new); `requirements.txt`
+(added `langgraph-checkpoint-sqlite`); `.gitignore` (added `*.db`) — none
+committed yet.
