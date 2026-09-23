@@ -472,3 +472,131 @@ two matter for this project specifically:
   facts, code does the scoring arithmetic) — if this experiment ever
   happens, keep that split rather than asking Jev to return a number
   directly.
+
+---
+
+## Aside — Instructor vs. baseline scoring experiment, same day (23 Sep 2026)
+
+**Goal:** decided not to chase Jev after all (no vendor lock-in for a
+1-week-old product). Instead, tested whether a structured-decoding
+library fixes the schema-conformance failure class found in Week 7/8
+(`invalid_json` from truncation, a missing required field) — a narrower,
+more answerable question than "is there a better judge model." Built on
+a separate branch, `experiment/instructor-scoring`, off `main`.
+
+**Done:**
+- Compared Instructor (Outlines was ruled out first: its constrained
+  decoding needs logit access — a locally-loaded model or a server
+  exposing a grammar param like vLLM's `guided_json` — which DeepSeek's
+  hosted OpenAI-compatible endpoint doesn't expose; it would degrade to
+  the same prompt-and-parse approach already in use, no real improvement).
+- Added `instructor` to `requirements.txt`, built
+  `scratch/scratch_structured_scoring.py`: runs the same Week 8 three
+  requirements (clear/vague/middle) x 5 repeats through two arms —
+  unmodified `call_deepseek_json` + `validate_response` (baseline) vs.
+  `instructor.from_openai(..., mode=instructor.Mode.JSON)` with
+  `response_model=TestabilityScore`, `max_retries=0` (`instructor_strict`,
+  a fair single-shot comparison, not conflated with Instructor's separate
+  auto-reask feature). Both arms reuse `TestabilityScore`,
+  `compute_testability_score`, and the exact same prompt file — nothing
+  about the scoring logic is forked or duplicated.
+
+**Found:**
+- **Real result, no `--stress` flag needed:** baseline hit a genuine
+  `invalid_json` on the `clear` requirement (4/5 valid) — even at
+  `MAX_TOKENS=2048`, the Week 7 fix didn't fully close this failure mode.
+  `instructor_strict` had zero conformance failures across all 15 calls
+  (5 per requirement x 3 requirements). First real evidence that
+  schema-in-request measurably reduces this specific failure class.
+- **Judgment non-determinism persists identically under both arms** — the
+  `middle` requirement ("under 2 seconds in most cases") scored
+  inconsistently (55 or 70) whether or not Instructor was used. Confirms
+  the prediction going in: structured decoding is a conformance fix, not
+  a fix for the model's own judgment varying run to run. Doesn't touch
+  the Week 8 finding; both remain true at the same time.
+- **Unrelated but worth flagging: installing `instructor` silently
+  downgraded `openai` from `3.14.0` to `1.109.1`** in the shared `.venv`
+  — pip backtracked all the way to `instructor==1.3.2` to resolve a
+  transitive conflict. `.venv` isn't branch-scoped, so this downgrade is
+  live even after switching back to `main` until reinstalled. Confirmed
+  `llm_client.py` still imports and makes real calls correctly despite
+  it (this write-up's own test run proves that), but the downgrade itself
+  is exactly the kind of silent, un-pinned dependency drift CLAUDE.md
+  already warns about for config — not yet resolved with a proper pin,
+  just confirmed harmless for the current call path.
+
+**Why this matters going forward:** Instructor's measured result (zero
+conformance failures across 15 calls, vs. one real `invalid_json` on
+baseline) is real evidence the approach works — but see the R&D follow-up
+below for why it wasn't adopted as-is.
+
+---
+
+### R&D follow-up, same day — root cause of the downgrade, and the decision not to adopt Instructor
+
+**Goal:** the `openai` downgrade above was flagged but not explained.
+Dug in rather than accepting or dismissing it on a hunch, since "we don't
+feel comfortable using such an old version" is a legitimate reason to
+stop and actually verify, not just proceed.
+
+**Found — this is a real, currently unresolvable package-ecosystem
+conflict, not a bad pin on our side:**
+- Root cause, confirmed by forcing `pip install --dry-run instructor==1.17.0
+  openai==3.14.0` (the newest release of each) and reading pip's own
+  conflict report: `instructor` depends on `jiter<0.15`, `openai` 3.14.0
+  depends on `jiter>=0.16.0` — non-overlapping ranges.
+- Checked every instructor release from 1.7.0 through 1.17.0 (its
+  latest) against PyPI's own metadata directly: **every single one caps
+  `jiter<0.15`.** Instructor has never published a version compatible
+  with the `openai` line that requires `jiter>=0.16.0`. `instructor==1.3.2`
+  wasn't pip making a poor choice — it's the newest release pip's
+  backtracking resolver happened to find that still declares support for
+  the older `openai<2.0.0` API, which needs a correspondingly older
+  `jiter`. No available pin fixes this; it's upstream.
+- Checked whether Outlines (the other candidate, already ruled out
+  architecturally — see the original aside above) is at least a cleaner
+  dependency: yes. Outlines lists `openai` as an optional, **unpinned**
+  extra and has no `jiter` dependency at all, so no version conflict.
+  But confirmed (web search, not assumed) that no external hosted API
+  currently supports Outlines' actual constrained decoding — its OpenAI
+  backend degrades to the same prompt-and-parse approach already in
+  `llm_client.py`. Cleaner install, but running our comparison against it
+  would just re-test the baseline under a different library name, not
+  answer anything new.
+
+**Decision: do not adopt Instructor into `graph.py`, or keep it pinned in
+`requirements.txt`.** Neither trade — an old `instructor` (1.3.2) nor a
+downgraded `openai` (1.109.1) — is worth taking for a result that a
+zero-dependency alternative could plausibly match. Two candidates
+identified for next time, neither built yet:
+1. `openai` 3.14.0's own native structured-output/`.parse()` method —
+   zero new dependencies, but unconfirmed whether DeepSeek's
+   OpenAI-compatible endpoint actually honors server-side schema
+   constraint vs. just its already-confirmed looser `json_object` mode.
+   Needs a real test against DeepSeek to know.
+2. A minimal hand-rolled reask-on-validation-error wrapper around the
+   existing `call_deepseek_json` + `validate_response`, reusing both
+   unmodified — replicates Instructor's retry behavior in a handful of
+   lines, no external dependency, no version risk.
+
+**Checkpoint met:** comparison ran end-to-end and produced a real
+(not theoretical) result distinguishing conformance failures from
+judgment non-determinism; root cause of the dependency conflict
+confirmed directly rather than guessed; decision made not to adopt,
+with two concrete next candidates identified for a future session.
+
+**Branch disposition:** `experiment/instructor-scoring` stays as the
+historical record of this result (script + this write-up) — not merged
+into `main`, not deleted. `.venv` should be reverted (`instructor`
+uninstalled, `openai` reinstalled to `3.14.0`) since the environment
+currently has the downgrade live and isn't branch-scoped. Candidate 1 or
+2 above would be the natural next step on this same branch, rather than
+opening a new one, since it's the same underlying question
+("can decode-time schema enforcement reduce conformance failures against
+DeepSeek").
+
+**Raw files:** `requirements.txt` (`instructor` line to be removed on
+revert); `scratch/scratch_structured_scoring.py` (kept, not runnable
+until `instructor` is reinstalled — intentional, it's a record of a
+result, not a maintained tool) — branch `experiment/instructor-scoring`,
+not on `main`.
