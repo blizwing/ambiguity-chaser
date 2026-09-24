@@ -600,3 +600,94 @@ revert); `scratch/scratch_structured_scoring.py` (kept, not runnable
 until `instructor` is reinstalled — intentional, it's a record of a
 result, not a maintained tool) — branch `experiment/instructor-scoring`,
 not on `main`.
+
+---
+
+## SESSION 4 — Human-in-the-loop interrupts and state persistence (24 Sep 2026)
+
+**Goal:** run the actual `/advanced-learn` SESSION 4 today rather than
+waiting for Saturday, building on yesterday's hands-on prep
+(`scratch/scratch_interrupt.py`). Scoped goal: fix the specific design
+constraint yesterday's session surfaced — LangGraph re-runs an
+interrupted node from its start on resume, so any work placed before
+`interrupt()` inside a node repeats every time — before touching the real
+`ask_clarifying_questions` node.
+
+**Teaching-method finding, worth recording for future sessions in this
+project:** household analogies (closet, spice container, waiter/dress)
+did not land for this concept, tried five different ones across several
+exchanges with no traction. What worked immediately was dropping analogy
+entirely and reading a literal table of real checkpoint values (state
+dict, `next` tuple) next to the exact code producing them, then actually
+running the code and reading real terminal output line by line. For
+mechanism-heavy topics (state machines, persistence, anything with a
+"what's actually on disk" answer), ground the explanation in real
+executed output from the start rather than reaching for a relatable
+metaphor first.
+
+**Done:**
+- Split the single `ask` node into two: `prepare_question` (does the
+  "expensive" work — stands in for the real node's future LLM call —
+  and writes a line to `scratch/counter.txt` so its execution count is
+  directly observable) and `ask_human` (contains nothing but
+  `interrupt(state.question)`). Wired `START -> prepare_question ->
+  ask_human -> finalize`.
+- Ran `start` -> `peek` -> `resume "curious"` as three genuinely separate
+  process invocations against the split graph and confirmed by direct
+  inspection, not narration:
+  - `counter.txt` had exactly **one** line after the full `start` +
+    `resume` cycle — `prepare_question` executed once, never repeated.
+  - `"[ask_human] node running, about to interrupt"` printed **twice**
+    across the same cycle (once on `start`, once on `resume`) — the
+    re-run-from-top rule from yesterday still holds, it's just now
+    isolated to a node with nothing costly in it.
+- Found and fixed a real bug along the way, not a staged one: the
+  original script's hardcoded `THREAD_ID = "demo-thread-1"` combined
+  with a never-deleted `interrupt_demo.db` meant a `start` run today
+  picked up a **stale, already-completed thread from a previous
+  session** — `answer`/`note` showed up already resolved in the very
+  first `start` result, before any resume happened. Confirmed via direct
+  sqlite inspection (`checkpoints` table had 8 rows already chained for
+  `demo-thread-1` before today's run). Same failure class as a Selenium
+  test reusing a browser session across test cases without teardown —
+  directly relevant to the real graph, since each requirement run needs
+  its own `thread_id` or clarifying-question state will bleed across
+  requirements.
+- Also found the opposite failure mode while fixing the above: switching
+  `THREAD_ID` to `f"demo-{uuid.uuid4().hex[:8]}"` (generated fresh per
+  process) broke the `start`/`peek`/`resume` CLI pattern entirely — each
+  separate `python` invocation got its own random id, so `peek` and
+  `resume` opened brand-new empty threads instead of the paused one,
+  and `resume` crashed with a Pydantic `topic: Field required` error
+  trying to resume a thread that never ran `prepare_question`. Settled
+  on a fixed `THREAD_ID = "week9-test-1"` for this repeatable scratch
+  test; the `uuid` import is left in, unused, for whenever this file
+  is adapted to generate one id per run and pass it through explicitly
+  instead of regenerating it per process.
+
+**Why this matters going forward:** confirms the exact fix needed for
+the real `ask_clarifying_questions` node in `graph.py` — its LLM call
+(question generation) must live in a node that completes *before* any
+`interrupt()` call, not inside the same node as the interrupt. Also
+confirms the real graph will need a `thread_id` derived from something
+stable per requirement (e.g. the requirement's own id), generated once
+and passed through explicitly — not regenerated per process, and not a
+shared constant either.
+
+**Checkpoint met:** SESSION 4's scoped goal — proved with real, directly
+observed evidence (a counter file, not an assertion) that splitting
+expensive work out of an interrupting node avoids repeating it on resume,
+and hit two real, previously-undiscovered bugs (stale shared thread,
+broken per-process random thread) in the process of proving it.
+
+**Raw files:** `scratch/scratch_interrupt.py` (modified — two-node
+split, fixed `THREAD_ID`) — not yet committed. `scratch/counter.txt` and
+`scratch/interrupt_demo.db` were test artifacts, deleted, not committed
+(the `.db` is gitignored anyway).
+
+**Not done today, deliberately:** the real Week 9 task — wiring this
+same split into `ask_clarifying_questions` in `graph.py`, plus giving
+the compiled graph a real checkpointer and a per-requirement
+`thread_id`. That's a design call (how the node splits, what state
+fields change), Pratham's first draft per the usual split, picked up
+fresh next session.
