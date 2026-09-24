@@ -1,4 +1,5 @@
 import sys
+import uuid
 
 from pydantic import BaseModel
 
@@ -9,14 +10,22 @@ from langgraph.types import Command, interrupt
 
 class State(BaseModel):
     topic: str
+    question: str | None = None
     answer: str | None = None
     note: str | None = None
 
 
-def ask(state: State) -> dict:
-    print("[ask] node running, about to interrupt")
-    human_answer = interrupt({"question": f"What tone should the note about '{state.topic}' use?"})
-    print("[ask] resumed with:", human_answer)
+def prepare_question(state: State) -> dict:
+    print("[prepare_question] running, counter bump")
+    with open("scratch/counter.txt", "a") as f:
+        f.write("ran\n")
+    return {"question": f"What tone should the note about '{state.topic}' use?"}
+
+
+def ask_human(state: State) -> dict:
+    print("[ask_human] node running, about to interrupt")
+    human_answer = interrupt(state.question)
+    print("[ask_human] resumed with:", human_answer)
     return {"answer": human_answer}
 
 
@@ -26,17 +35,20 @@ def finalize(state: State) -> dict:
 
 
 builder = StateGraph(State)
-builder.add_node("ask", ask)
+builder.add_node("prepare_question", prepare_question)
+builder.add_node("ask_human", ask_human)
 builder.add_node("finalize", finalize)
-builder.add_edge(START, "ask")
-builder.add_edge("ask", "finalize")
+builder.add_edge(START, "prepare_question")
+builder.add_edge("prepare_question", "ask_human")
+builder.add_edge("ask_human", "finalize")
 builder.add_edge("finalize", END)
 
 DB_PATH = "scratch/interrupt_demo.db"
-THREAD_ID = "demo-thread-1"
+THREAD_ID = "week9-test-1"
 
 
 def main():
+    print("THREAD_ID:", THREAD_ID)
     mode = sys.argv[1] if len(sys.argv) > 1 else "start"
 
     with SqliteSaver.from_conn_string(DB_PATH) as checkpointer:
