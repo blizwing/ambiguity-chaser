@@ -691,3 +691,95 @@ the compiled graph a real checkpointer and a per-requirement
 `thread_id`. That's a design call (how the node splits, what state
 fields change), Pratham's first draft per the usual split, picked up
 fresh next session.
+
+---
+
+## Week 9 — Wiring interrupt/resume into the real graph (25 Sep 2026)
+
+**Goal:** the actual Week 9 task, picked up fresh after SESSION 4's scratch
+proof — wire that same prepare/ask split into the real
+`ask_clarifying_questions` node in `graph.py`, add a real checkpointer,
+and give the graph a per-requirement `thread_id`, so "score -> ask ->
+*(human answers)* -> resume -> generate real spec" becomes one
+continuous run instead of the current dead end at `END`.
+
+**Workflow note, worth recording:** deliberate deviation from the usual
+"Pratham writes first draft on judgment-heavy days" split for this one
+session. Instead: Pratham made every actual design call up front as
+explicit choices (node split shape, `thread_id` derivation, resume-fold
+approach) before any code was written, Claude wrote the code in small
+reviewable chunks with a why-note per chunk, then walked through every
+changed function, then an understanding check on the why (not the what)
+before this entry was drafted. Judgment stayed Pratham's; typing didn't.
+
+**Done:**
+- Three design decisions made explicitly before writing any code:
+  - Node split: `ask_clarifying_questions` split into `generate_questions`
+    (the LLM call, completes fully before anything can pause) and
+    `ask_human` (nothing but `interrupt()`) — directly mirrors SESSION 4's
+    scratch proof, for the same reason: LangGraph re-runs an interrupted
+    node from its start on every resume, so the LLM call has to live
+    somewhere that isn't re-entered.
+  - `thread_id`: deterministic `sha256(requirement)[:16]`, so the same
+    requirement string always resumes the same paused thread without a
+    caller having to track an id separately. Accepted tradeoff: two
+    identical requirement strings submitted as separate runs would
+    collide onto the same thread.
+  - Resume path: the human's answer folds into the requirement text
+    (`"{requirement}\nClarification: {answer}"`) and routes straight to
+    `generate_test_case` — no re-scoring. One prompt template serves both
+    the direct path and the post-resume path this way. Re-scoring the
+    clarified requirement is Week 10's re-ask loop, explicitly out of
+    scope here.
+- Added `GraphState.human_answer`. Added `route_after_questions` — a
+  fail-safe, Claude's own addition, flagged and confirmed rather than
+  assumed: if `generate_questions` itself comes back invalid, route
+  straight to `END` instead of interrupting with nothing real to show a
+  human. Same self-distrust discipline `score_testability` already
+  applies to its own output.
+- Rewired the graph: `score_testability -> (generate_test_case |
+  generate_questions)`, `generate_questions -> (ask_human | END)`,
+  `ask_human -> generate_test_case -> END`. The old dead end
+  (`ask_clarifying_questions -> END`) is gone.
+- Added a real checkpointer (`SqliteSaver`, `graph_state.db` — already
+  covered by the existing `*.db` gitignore rule) and a three-mode CLI
+  (`start` / `peek` / `resume`) on `graph.py` itself, mirroring
+  `scratch_interrupt.py`'s shape — proving persistence on the real graph
+  needed the same separate-process pattern, not just narration.
+
+**Found — proved with three genuinely separate process invocations:**
+- `start "The system should be fast."` scored 0, generated 7 real
+  clarifying questions, interrupted before ever calling
+  `generate_test_case` — `__interrupt__` present in the returned state.
+- `peek`, from a separate process, read the identical paused state,
+  `next=('ask_human',)`, and the same pending `Interrupt` object, entirely
+  from disk.
+- `resume`, from a third process, with a real clarification (a concrete
+  2-second/broadband threshold) completed the graph and produced a valid
+  `TestCase` — the model even flagged that "standard broadband" was still
+  undefined in `expected_result`, consistent with this project's
+  established non-fabrication behavior rather than inventing a number.
+- Direct path regression-tested with a deliberately unambiguous
+  rate-limit/HTTP 429 requirement — scored 100, routed straight to
+  `generate_test_case`, no interrupt, confirming today's changes didn't
+  touch the high-score path.
+- Re-ran the Week 7/8 account-lockout requirement and hit the already-
+  known scorer non-determinism firsthand this session: scored 85 instead
+  of 100 this time (flagged ambiguity on "lock" semantics), correctly
+  routing through the interrupt path instead of direct generation — not a
+  bug in today's work, a live instance of the Week 8 finding.
+
+**Why this matters going forward:** the Week 7/8 dead end is now a real
+pause point — this project's core differentiator (ask instead of
+fabricate, and actually let a human answer) runs end-to-end for the
+first time. Week 10's re-ask loop + max-iteration guard is the natural
+next step, since today's resume path deliberately skips re-scoring the
+clarified requirement.
+
+**Checkpoint met:** pause, cross-process persistence, and resume-with-
+answer proven on the real graph (not the scratch demo), plus the direct
+high-score path confirmed unaffected — all verified by direct execution
+across three separate process invocations.
+
+**Raw files:** `graph.py` (modified — node split, new edges, checkpointer,
+CLI) — not yet committed.
