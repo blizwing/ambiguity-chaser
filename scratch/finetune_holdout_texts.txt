@@ -1,0 +1,40 @@
+The system must suspend a driver's account after 3 verified customer complaints within a 30-day period.
+The delivery app should give customers peace of mind about their order status.
+If an order has not been picked up by a driver within 15 minutes of being ready, the system must reassign it to another available driver.
+Refund requests must be reviewed by a human agent.
+The system must apply a late fee of $5 for any invoice unpaid after its due date.
+The onboarding wizard should feel welcoming to first-time users.
+A ride request must be canceled automatically if no driver accepts it within 5 minutes.
+The platform must support real-time collaboration between team members.
+If a user's uploaded ID photo fails automated verification, the system must route it to a human reviewer within 1 business day.
+Notifications should be relevant to what the user actually cares about.
+The system must archive conversations older than 180 days.
+Customer support responses must be helpful and courteous.
+When an order is marked as delivered, the system must request a rating from the customer within 1 hour.
+The recommendation algorithm should adapt to changing user preferences.
+If a device has not reported telemetry for more than 10 minutes, it must be marked offline in the dashboard.
+The platform must be easy to navigate for non-technical users.
+A subscription must be paused, not canceled, when a user selects "pause membership."
+The alerting system should minimize false positives.
+The system must reject file uploads that are not in PDF, PNG, or JPEG format.
+Employees should feel confident using the new expense tool.
+If an expense report exceeds $1,000, it must require approval from a director before reimbursement.
+The chat feature must maintain message order even under high load.
+A returned item must be inspected before a refund is issued.
+The search bar should return results that make sense to the user.
+The system must automatically flag any duplicate invoice numbers submitted within the same billing cycle.
+Voice commands should be recognized reliably in a quiet room.
+If a warehouse robot's battery drops below 15%, it must return to its charging dock before continuing tasks.
+The privacy settings page must clearly show what data is being collected.
+A meeting must not be scheduled if it conflicts with an attendee's existing calendar event, unless marked as an override.
+The system should scale smoothly as the number of active users grows.
+Any transaction flagged as high-risk must be held for manual review before settlement.
+The mobile checkout should be just as convenient as the desktop one.
+If a user's trial period ends without a payment method on file, their account must be downgraded to read-only access.
+The onboarding email sequence should keep new users engaged over their first week.
+A ticket must be reopened if the customer replies within 7 days of it being closed.
+The map view must update marker positions as new location data arrives.
+The system should be intuitive enough that most users won't need a tutorial.
+If two devices attempt to control the same appliance simultaneously, the system must apply the most recent command.
+Password reset links must expire after being used once.
+The dashboard should present data in a way that's easy to act on.

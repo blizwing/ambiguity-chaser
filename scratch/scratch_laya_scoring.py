@@ -215,7 +215,7 @@ def laya_score(bools: dict) -> int:
 def main():
     print(f"=== Loading Laya (english checkpoint) ===")
     t0 = time.time()
-    router = Router()
+    router = Router(device="cuda")
     # Warm the checkpoint now so per-item timings below reflect steady state,
     # not the one-time lazy-load cost.
     router.predict("warmup", {"has_measurable_condition": LAYA_QUESTIONS["has_measurable_condition"]})
