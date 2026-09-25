@@ -783,3 +783,258 @@ across three separate process invocations.
 
 **Raw files:** `graph.py` (modified — node split, new edges, checkpointer,
 CLI) — not yet committed.
+
+---
+
+## Aside — Laya vs. baseline scoring experiment (25 Sep 2026)
+
+**Goal:** same shape of question as the Jev and Instructor asides above —
+whether Laya (`convaiinnovations/laya`, Apache 2.0, self-hosted,
+open-weight) can replace or complement the DeepSeek-based
+`score_testability` node. Raised because it's pitched as an open,
+self-hostable equivalent of Jev's typed-decision architecture, which would
+remove the exact objection (cloud-only, closed-weight) that parked Jev.
+Built on a separate branch, `experiment/laya-scoring`, off `main` at
+`27b9e45`, in its own git worktree with a fully isolated `.venv` (not the
+shared one — deliberately, after the Instructor experiment's shared-venv
+`openai` downgrade).
+
+**Done:**
+- Hand-labeled 8 requirements (the original 3 clear/vague/middle canonical
+  texts plus 5 new ones, added so all 4 `score_testability` criteria —
+  not just `has_measurable_condition` — had clean examples) against the
+  same 4 booleans the production scorer computes.
+- Wired Laya's `noul` (boolean) question primitive to the *same, unreworded*
+  criterion wording from `prompts/testability_score_v1.txt`, so any
+  accuracy gap reflects the model, not different question phrasing.
+- Ran both arms — Laya (`router.predict`) and the real, unmodified
+  `call_deepseek_json` + `validate_response` baseline — on the same 8
+  texts, through the same unmodified `compute_testability_score()`, so
+  nothing about the scoring arithmetic is forked per arm.
+- Each Laya call repeated 3x per requirement to check determinism; the
+  `middle` case ("under 2 seconds in most cases") deliberately left
+  unlabeled and excluded from the accuracy tally, since Week 8 already
+  found the baseline itself disagrees with itself on that exact text.
+
+**Found — real numbers, `scratch/scratch_laya_scoring.py` SUMMARY output:**
+- **Accuracy, Laya vs. hand-labels (excl. contested `middle`), 28 checks:**
+  `has_measurable_condition` 5/7 (71%), `has_vague_qualitative_language`
+  6/7 (86%), `has_ambiguous_scope` 4/7 (57%), `missing_precondition` 2/7
+  (**29%**) — overall **17/28 (61%)**.
+- **Same 28 checks, baseline (DeepSeek, current production scorer):**
+  100%, 100%, 100%, 86% — overall **27/28 (96%)**, 0/24 invalid-JSON
+  responses.
+- **Calibration — confidence ≥0.8 but wrong:** all 4 occurrences are on
+  the *same* criterion, `missing_precondition` (confidences 0.82, 0.90,
+  0.81, 0.83 on `clear_login`, `vague_fast`, `vague_checkout_ux`,
+  `vague_error_handling` respectively). Not scattered noise — Laya is
+  both the least accurate and the most overconfident specifically on
+  that one criterion.
+- **Determinism:** all 32 (requirement, criterion) pairs exactly
+  repeatable across 3 runs each — confirms the expected non-autoregressive,
+  no-sampling behavior; a genuine point in Laya's favor.
+- **Latency:** Laya warm mean 1.44s per call answering all 4 criteria at
+  once (~0.36s/criterion) vs. baseline's 3.01s per single-criterion call
+  — Laya is meaningfully cheaper/faster per criterion, consistent with
+  the original pitch.
+- **The earlier single-criterion spot check generalized, not a fluke:**
+  on the contested `middle` text, Laya again read the numeric "under 2
+  seconds" threshold as *not* measurable, confidently (`has_measurable_
+  condition` p=0.08, confidence=0.92) — same direction and same
+  confident-wrongness as the original 3-point probe that motivated
+  building this full script in the first place.
+
+**Addendum, same day — checked whether we ran Laya wrong before trusting
+the accuracy numbers above, not just assumed the setup was fine:**
+prompted by "are we using Laya wrong, full fp16 or quantized?" Read the
+actual installed source (`laya/agent.py`, `laya/common.py`), not the
+package's marketing copy or docstrings alone.
+- **No quantization path exists anywhere in this library.** Searched the
+  whole `laya` source for int8/bitsandbytes/quantization handling —
+  there is none. Not a lever we failed to pull; it isn't offered.
+- **We ran full fp32 compute, not fp16.** The checkpoint's weights are
+  stored on disk as fp16 (`model.safetensors`, confirmed earlier), but
+  `common.py:build_model` never passes a `torch_dtype` when constructing
+  the encoder, so the model's parameters are built in PyTorch's default
+  fp32. `agent.py:335`'s `load_state_dict(weights, strict=True)` then
+  copies the fp16-stored values into those fp32 tensors — an upcast, not
+  a downcast. `agent.py:392-407`'s device/dtype policy only enables
+  fp16/bf16 autocast on CUDA or MPS; on our CPU-only machine `self.dtype`
+  stays `torch.float32` and `amp_enabled=False` unless `LAYA_CPU_AMP=bf16`
+  is set explicitly, which our script didn't set. So this run used *more*
+  numerical precision than the checkpoint's native fp16 format, not less
+  — precision loss does not explain the 61% vs. 96% accuracy gap.
+- **Other usage checked and found correct, not a fallback/degraded path:**
+  `Router.predict`'s signature explicitly types `state` as `str | dict |
+  list` — passing the raw requirement string directly (what the script
+  does) is a first-class documented input, not a workaround. Question
+  primitive (`noul`) and checkpoint (`english`, auto-routed) both match
+  the reasoning already recorded above. The one thing genuinely not
+  exercised is batched inference (`predict_batch`/`route_batch`) instead
+  of looping single `predict()` calls — a throughput question, not an
+  accuracy one; it doesn't change what the model computes per item.
+- **Working hypothesis for the gap, architectural rather than a setup
+  bug:** `missing_precondition`'s phrasing ("fail to state an explicit
+  trigger...") is a double-negative-style judgment a small classifier
+  head may just handle worse than an LLM does, independent of precision.
+  Untested — would need the reworded-question experiment noted below to
+  confirm.
+
+**Decision (draft — for your review, not yet final):** the accuracy gap
+(61% vs. 96%) plus a concentrated, overconfident failure mode on
+`missing_precondition` reads as a real result against adopting Laya as a
+replacement or complement for `score_testability` right now — same bar
+the Instructor experiment used ("a measured result decides, not 'should
+work'"). Determinism and per-call latency are real, measured points in
+Laya's favor if this is ever revisited, e.g. narrowed to the 3 criteria
+it scored better on, or with `missing_precondition`'s question reworded
+(which would reopen the fairness-constraint tradeoff this run
+deliberately avoided).
+
+**Branch disposition (draft, pending your call):** by the same pattern as
+`experiment/instructor-scoring` — likely keep `experiment/laya-scoring`
+as the historical record (script + this write-up), not merged into
+`main`, not deleted. No shared-venv cleanup needed this time, since this
+worktree's `.venv` was isolated from the start.
+
+**Raw files:** `scratch/scratch_laya_scoring.py` (new, untracked),
+`scratch/laya_run_output.log` (new, untracked — full run output behind
+the SUMMARY above), `requirements.txt` (modified — `laya` appended,
+last line). None committed; per CLAUDE.md, Claude does not run
+`git add`/`commit`/`push` here.
+
+## Aside — Laya fine-tuning, 3 rounds (26 Sep 2026), follow-up to the zero-shot aside above
+
+**Goal:** the zero-shot aside above left Laya's accuracy gap (61% vs.
+baseline's 96%) unresolved as "against adopting Laya right now," with a
+carried-over caveat from the vendor's own numbers: base Laya checkpoints
+are near-chance zero-shot but reach 0.766 after fine-tuning on the
+vendor's own typed-decisions benchmark (vs. 0.362 zero-shot on that same
+benchmark). This session tests whether the same jump holds on *our*
+schema, not a generic benchmark — closing the loop the zero-shot aside
+left open, per the vendor's own framing ("Laya is a fast base to
+specialise, not a zero-shot decision engine").
+
+**Setup, done this session (see `HANDOVER.md` for the full blow-by-blow —
+not duplicated here):**
+- JarvisLabs ruled out as a compute option — auth fine, but zero live GPU
+  inventory confirmed two independent ways (buggy `jl gpus` listing *and*
+  the create endpoint itself refusing all 6 region/VM/container
+  combinations). Not a bug in our setup; reported upstream as a
+  client/backend contract mismatch worth filing.
+- Google Colab MCP (`googlecolab/colab-mcp`, verified against the real
+  GitHub org before installing) set up at **user** MCP scope — same
+  reasoning as the CLAUDE.md rule about not writing external server
+  config into the public repo's `.mcp.json`. Live browser connection made
+  this session; confirmed it's a **proxy**, not a headless API — GPU
+  selection and file transfer both have to go through code cells (no
+  dedicated MCP tool for either), and Colab's `files.download()` turned
+  out **unreliable at ~1.5GB scale** (silently no-ops some of the time,
+  works other times — not deterministic; a Drive-mount fallback exists if
+  needed, but Pratham's preference is to keep retrying the browser
+  download first).
+- Notebook adapted from the vendor's own
+  `laya_finetune_typed_decisions_2xT4_kaggle.ipynb` reference (fetched
+  and read, not guessed): same RLCD algorithm (GRPO-style group baseline,
+  strictly-proper-scoring-rule reward, encoder/head differential LR,
+  cosine schedule, sigma decay, post-training temperature calibration),
+  with `torch.distributed`/`DDP`/`torchrun` stripped since our dataset
+  (~200 items) is ~25x smaller than the vendor's and one T4 is plenty.
+  Confirmed T4 (15360MiB) attached via `nvidia-smi` before training.
+- **`missing_precondition` switched from `noul` to `choice`** for
+  fine-tuning (open question the zero-shot aside deliberately left
+  unresolved) — explicit decision with Pratham, not defaulted: the
+  zero-shot variant test already showed `choice` fixes `noul`'s
+  documented label-anchoring bug on this exact criterion, and
+  fine-tuning has no fairness-constraint reason to keep inheriting a
+  known bug. Other 3 criteria stayed `noul`, wording verbatim from
+  `scratch/scratch_laya_scoring.py`.
+- Crisp one-hot targets built directly from our hand-labeled JSONL
+  (`build_training_item()`, new in the notebook) — not the vendor's
+  multi-teacher soft-agreement distributions, since we have single
+  ground-truth booleans, not teacher-agreement counts.
+
+**Found — 3 rounds, each a real run against the held-out
+`finetune_holdout_deepseek_labels.jsonl` (39 texts, 156 checks, labels
+from the real unmodified `call_deepseek_json` + `validate_response`
+path, a different source than every round's training labels):**
+
+| | measurable_cond | vague_qual | ambiguous_scope | missing_precond | **Overall** | ECE |
+|---|---|---|---|---|---|---|
+| Zero-shot (GPU, from aside above) | — | — | — | 29% | **57%** | — |
+| Round 1 (168 items, 15 epochs) | 79% | 97% | 90% | 77% | **86%** | 0.080 |
+| Round 2 (199 items, 15 epochs) | 90% | 95% | 90% | 74% | **87%** | 0.064 |
+| Round 3 (199 items, 8 epochs) | 82% | 97% | 92% | 82% | **88%** | 0.103 |
+
+- **Round 1 → Round 2:** added 31 Claude-authored examples targeting two
+  gaps found by reading round 1's actual 22 held-out misses (not
+  guessed): `has_measurable_condition` confidently under-detects
+  *concrete state changes with no literal number* (e.g. "must be
+  reviewed by a human agent" — training skewed toward numeric
+  thresholds), and `has_ambiguous_scope` under-detects *vague operational
+  verbs* (archive, flag, merge, route...). The `has_measurable_condition`
+  fix worked exactly as hypothesized (+11pt). The `ambiguous_scope` fix
+  didn't move the aggregate number. `missing_precondition` dipped
+  slightly (77%→74%) — likely noise on a 39-item set, or dilution from
+  more `choice`-type training diversity. New examples checked for zero
+  overlap with the held-out eval texts before training (asserted in the
+  notebook, not just assumed).
+- **Round 2's real problem wasn't the accuracy number — it was
+  overfitting.** Loss hit exactly 0.0 by epoch 14, and **both**
+  calibration temperatures clamped at the fitter's own max (10.0),
+  meaning the model was maximally overconfident on calibration items it
+  never trained on. That's what motivated Round 3.
+- **Round 2 → Round 3:** single-variable, hypothesis-driven change
+  (epochs 15→8; round 2's own per-epoch log showed loss already at 0.12
+  by epoch 8, well before full memorization). Result: best overall
+  accuracy (88%) and the most balanced per-criterion spread (nothing
+  below 82%) of all 3 rounds — but **ECE got worse, not better** (0.064 →
+  0.103), the opposite of the calibration hypothesis. Real, non-obvious
+  trade-off: less raw overfitting (the `choice` temperature un-clamped,
+  5.31 vs. 10.0) bought accuracy and balance, not better calibration.
+  `noul`'s temperature stayed near the clamp ceiling (9.6) across every
+  round — a standing signal that the `noul` head specifically runs very
+  overconfident on this task/dataset scale, independent of epoch count.
+- **Ceiling isn't just about the model.** Reading the actual misses
+  (not just the aggregate rate) found several "errors" that are
+  arguably noisy gold labels, not model mistakes — e.g. DeepSeek marks
+  *"archive conversations older than 180 days"* and *"...over their
+  first week"* as `missing_precondition=True` despite both containing
+  what reads like an explicit trigger/bound. Same pattern Week 8 already
+  found in the baseline (self-disagreement on the contested `middle`
+  case). A classifier chasing 100% agreement with a labeler that
+  disagrees with itself at the margins is chasing an eval-set artifact,
+  not a real capability gap — the realistic target is DeepSeek's own
+  ceiling (96-100%), not 100%.
+
+**Decision:** keep the **Round 3 checkpoint** (88% overall, best
+per-criterion balance, no criterion below 82%) as "the" fine-tuned
+model — downloaded locally to
+`Downloads/laya_finetuned_testability(1).zip` (distinct filename from
+round 1's earlier download, same OUTPUT_DIR path reused across rounds).
+Whether to push it to HF Hub is still explicitly Pratham's call, per
+`HANDOVER.md` step 8 — the notebook's push cell exists but is gated
+`PUSH_TO_HF = False` by default and was not run this session. This
+reads as a real, positive result for Laya fine-tuning specifically
+(zero-shot 57% → fine-tuned 88%, closing most but not all of the gap to
+the 96-100% baseline) — a different conclusion from the zero-shot
+aside's "against adopting Laya right now," worth revisiting the
+`score_testability` replace/complement question against, but that's a
+separate decision from this session's scope.
+
+**Branch disposition:** same as the zero-shot aside — keep
+`experiment/laya-scoring` as the historical record, not merged into
+`main`. `HANDOVER.md` in this worktree has now served its purpose (all
+10 "Next steps" items complete); worth Pratham's call on whether to
+delete it or leave it as a record of how this session was resumed.
+
+**Raw files (this session):** `scratch/finetune_dataset_claude_v1.jsonl`,
+`scratch/finetune_dataset_claude_v2_additions.jsonl` (new, the 31
+gap-targeted examples), `scratch/finetune_holdout_texts.txt`,
+`scratch/finetune_holdout_deepseek_labels.jsonl`,
+`scratch/build_holdout_labels.py`, `scratch/scratch_laya_choice_variant.py`,
+`scratch/laya_gpu_run_output.log`, `scratch/laya_finetune_colab.ipynb`
+(new — reconstructed from the live Colab session's cells, the exact code
+behind all 3 rounds' numbers above), `HANDOVER.md` (all new/modified,
+untracked or already-untracked). None committed; per CLAUDE.md, Claude
+does not run `git add`/`commit`/`push` here.

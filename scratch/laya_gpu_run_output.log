@@ -1,0 +1,99 @@
+=== Loading Laya (english checkpoint) ===
+Fetching 5 files:   0%|          | 0/5 [00:00<?, ?it/s]Fetching 5 files: 100%|##########| 5/5 [00:00<00:00, 1673.44it/s]
+E:\Learning\Tech Career\AI QA\ambiguity-chaser-laya\.venv\Lib\site-packages\laya\router.py:260: RuntimeWarning: laya: this checkpoint ships invalid temperatures or values outside [0.5, 5]; using choice:11+=0.10058280825614929 -> 0.5. Treat confidence from the affected entries as uncalibrated.
+  agent = Agent(repo, device=self.device, token=self.token, subfolder=sub)
+Warm-up (incl. first load) took 7.24s
+
+--- clear_login: 'The system must lock a user account after 5 failed login attempts.' ---
+  laya  has_measurable_condition         p_true=0.528 conf=0.528 bool=True  expected=True  
+  laya  has_vague_qualitative_language   p_true=0.503 conf=0.503 bool=True  expected=False <- WRONG
+  laya  has_ambiguous_scope              p_true=0.181 conf=0.819 bool=False expected=False 
+  laya  missing_precondition             p_true=0.820 conf=0.820 bool=True  expected=False <- WRONG, confidently (0.82)
+  laya derived score: 70
+  baseline scores across 3 valid run(s): [100, 100, 100]
+
+--- vague_fast: 'The system should be fast.' ---
+  laya  has_measurable_condition         p_true=0.093 conf=0.907 bool=False expected=False 
+  laya  has_vague_qualitative_language   p_true=0.801 conf=0.801 bool=True  expected=True  
+  laya  has_ambiguous_scope              p_true=0.293 conf=0.707 bool=False expected=True  <- WRONG
+  laya  missing_precondition             p_true=0.098 conf=0.902 bool=False expected=True  <- WRONG, confidently (0.90)
+  laya derived score: 0
+  baseline scores across 3 valid run(s): [0, 0, 0]
+
+--- middle_2s: 'The system must respond in under 2 seconds in most cases.' ---
+  laya  has_measurable_condition         p_true=0.077 conf=0.923 bool=False expected=None  (contested, not scored)
+  laya  has_vague_qualitative_language   p_true=0.906 conf=0.906 bool=True  expected=None  (contested, not scored)
+  laya  has_ambiguous_scope              p_true=0.054 conf=0.946 bool=False expected=None  (contested, not scored)
+  laya  missing_precondition             p_true=0.145 conf=0.855 bool=False expected=None  (contested, not scored)
+  laya derived score: 0
+  baseline scores across 3 valid run(s): [70, 70, 55]
+
+--- vague_login_support: 'The application shall support user login.' ---
+  laya  has_measurable_condition         p_true=0.035 conf=0.965 bool=False expected=False 
+  laya  has_vague_qualitative_language   p_true=0.180 conf=0.820 bool=False expected=False 
+  laya  has_ambiguous_scope              p_true=0.667 conf=0.667 bool=True  expected=True  
+  laya  missing_precondition             p_true=0.717 conf=0.717 bool=True  expected=True  
+  laya derived score: 0
+  baseline scores across 3 valid run(s): [0, 0, 0]
+
+--- clear_payment_approval: 'When a user submits a payment of more than $10,000, the system must require secondary approval before processing.' ---
+  laya  has_measurable_condition         p_true=0.339 conf=0.661 bool=False expected=True  <- WRONG
+  laya  has_vague_qualitative_language   p_true=0.104 conf=0.896 bool=False expected=False 
+  laya  has_ambiguous_scope              p_true=0.323 conf=0.677 bool=False expected=False 
+  laya  missing_precondition             p_true=0.579 conf=0.579 bool=True  expected=False <- WRONG
+  laya derived score: 0
+  baseline scores across 3 valid run(s): [100, 100, 100]
+
+--- vague_checkout_ux: 'The system should provide a good user experience during checkout.' ---
+  laya  has_measurable_condition         p_true=0.247 conf=0.753 bool=False expected=False 
+  laya  has_vague_qualitative_language   p_true=0.527 conf=0.527 bool=True  expected=True  
+  laya  has_ambiguous_scope              p_true=0.294 conf=0.706 bool=False expected=True  <- WRONG
+  laya  missing_precondition             p_true=0.191 conf=0.809 bool=False expected=True  <- WRONG, confidently (0.81)
+  laya derived score: 0
+  baseline scores across 3 valid run(s): [0, 0, 0]
+
+--- clear_reengagement_email: "If the user's account has been inactive for 90 days, the system must send a re-engagement email." ---
+  laya  has_measurable_condition         p_true=0.384 conf=0.616 bool=False expected=True  <- WRONG
+  laya  has_vague_qualitative_language   p_true=0.139 conf=0.861 bool=False expected=False 
+  laya  has_ambiguous_scope              p_true=0.057 conf=0.943 bool=False expected=False 
+  laya  missing_precondition             p_true=0.337 conf=0.663 bool=False expected=False 
+  laya derived score: 0
+  baseline scores across 3 valid run(s): [100, 100, 100]
+
+--- vague_error_handling: 'The system must handle errors gracefully.' ---
+  laya  has_measurable_condition         p_true=0.082 conf=0.918 bool=False expected=False 
+  laya  has_vague_qualitative_language   p_true=0.238 conf=0.762 bool=False expected=True  <- WRONG
+  laya  has_ambiguous_scope              p_true=0.207 conf=0.793 bool=False expected=True  <- WRONG
+  laya  missing_precondition             p_true=0.164 conf=0.836 bool=False expected=True  <- WRONG, confidently (0.84)
+  laya derived score: 0
+  baseline scores across 3 valid run(s): [0, 0, 0]
+
+=== SUMMARY ===
+
+-- Laya zero-shot accuracy vs. our expected labels (excludes contested 'middle' case) --
+  has_measurable_condition         5/7 (71%)
+  has_vague_qualitative_language   5/7 (71%)
+  has_ambiguous_scope              4/7 (57%)
+  missing_precondition             2/7 (29%)
+  OVERALL                          16/28 (57%)
+
+-- Baseline (DeepSeek, current production scorer) accuracy vs. the same labels --
+  has_measurable_condition         7/7 (100%)
+  has_vague_qualitative_language   7/7 (100%)
+  has_ambiguous_scope              7/7 (100%)
+  missing_precondition             7/7 (100%)
+  OVERALL                          28/28 (100%)
+  baseline invalid_json/invalid responses: 0/24
+
+-- Determinism (Laya, identical input repeated) --
+  All 32 (requirement, criterion) pairs were exactly repeatable across 3 runs.
+
+-- Confidently wrong answers (confidence >= 0.8 but bool != expected) --
+  clear_login/missing_precondition: confidence=0.82
+  vague_fast/missing_precondition: confidence=0.90
+  vague_checkout_ux/missing_precondition: confidence=0.81
+  vague_error_handling/missing_precondition: confidence=0.84
+
+-- Latency --
+  laya predict() (warm, 4 questions/call): mean=0.130s  min=0.035s max=0.439s  n=24
+  baseline call_deepseek_json (1 question/call): mean=3.004s  min=1.511s max=8.239s  n=24

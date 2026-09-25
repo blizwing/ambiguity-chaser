@@ -103,6 +103,19 @@ OpenAI-compatible SDK, for cost reasons.
   faster and cheaper, not more reliable. Full writeup in `NOTES.md`,
   Week 9 aside.
 
+## Experiments
+
+Full standalone write-ups for research spikes that don't belong in the
+day-by-day `NOTES.md` log — each is self-contained (motivation, method,
+results, decision) and meant to be readable on its own, including outside
+this repo.
+
+- [`experiments/laya-fine-tuning.md`](experiments/laya-fine-tuning.md) —
+  can a 421M open-weight self-hosted model (Laya) replace the DeepSeek
+  judge behind `score_testability`? Zero-shot evaluation, root-cause
+  investigation, a dead-end GPU rental provider, and 3 fine-tuning rounds
+  (57% → 88% held-out accuracy). Branch `experiment/laya-scoring`.
+
 ## Repo layout
 
 Normal descriptive filenames throughout (`graph.py`, `schemas.py`,
@@ -115,6 +128,9 @@ lives only in `NOTES.md`, keyed by date, never encoded into a filename
 - `llm_client.py` — DeepSeek API wrapper (JSON-mode calls).
 - `prompts/` — prompt text files, versioned by filename suffix (`_v1`).
 - `scratch/` — throwaway hands-on exercises, not part of the graph.
+- `experiments/` — full standalone write-ups for research spikes (see
+  [Experiments](#experiments) above) — self-contained, unlike the
+  day-by-day `NOTES.md` entries.
 - `NOTES.md` — full day-by-day build log: goals, what got built, what was
   found (including dead ends and bugs), why it matters, raw files touched.
   The detailed record; this README is the rollup.
