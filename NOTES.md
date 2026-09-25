@@ -691,3 +691,122 @@ the compiled graph a real checkpointer and a per-requirement
 `thread_id`. That's a design call (how the node splits, what state
 fields change), Pratham's first draft per the usual split, picked up
 fresh next session.
+
+---
+
+## Aside — Laya vs. baseline scoring experiment (25 Sep 2026)
+
+**Goal:** same shape of question as the Jev and Instructor asides above —
+whether Laya (`convaiinnovations/laya`, Apache 2.0, self-hosted,
+open-weight) can replace or complement the DeepSeek-based
+`score_testability` node. Raised because it's pitched as an open,
+self-hostable equivalent of Jev's typed-decision architecture, which would
+remove the exact objection (cloud-only, closed-weight) that parked Jev.
+Built on a separate branch, `experiment/laya-scoring`, off `main` at
+`27b9e45`, in its own git worktree with a fully isolated `.venv` (not the
+shared one — deliberately, after the Instructor experiment's shared-venv
+`openai` downgrade).
+
+**Done:**
+- Hand-labeled 8 requirements (the original 3 clear/vague/middle canonical
+  texts plus 5 new ones, added so all 4 `score_testability` criteria —
+  not just `has_measurable_condition` — had clean examples) against the
+  same 4 booleans the production scorer computes.
+- Wired Laya's `noul` (boolean) question primitive to the *same, unreworded*
+  criterion wording from `prompts/testability_score_v1.txt`, so any
+  accuracy gap reflects the model, not different question phrasing.
+- Ran both arms — Laya (`router.predict`) and the real, unmodified
+  `call_deepseek_json` + `validate_response` baseline — on the same 8
+  texts, through the same unmodified `compute_testability_score()`, so
+  nothing about the scoring arithmetic is forked per arm.
+- Each Laya call repeated 3x per requirement to check determinism; the
+  `middle` case ("under 2 seconds in most cases") deliberately left
+  unlabeled and excluded from the accuracy tally, since Week 8 already
+  found the baseline itself disagrees with itself on that exact text.
+
+**Found — real numbers, `scratch/scratch_laya_scoring.py` SUMMARY output:**
+- **Accuracy, Laya vs. hand-labels (excl. contested `middle`), 28 checks:**
+  `has_measurable_condition` 5/7 (71%), `has_vague_qualitative_language`
+  6/7 (86%), `has_ambiguous_scope` 4/7 (57%), `missing_precondition` 2/7
+  (**29%**) — overall **17/28 (61%)**.
+- **Same 28 checks, baseline (DeepSeek, current production scorer):**
+  100%, 100%, 100%, 86% — overall **27/28 (96%)**, 0/24 invalid-JSON
+  responses.
+- **Calibration — confidence ≥0.8 but wrong:** all 4 occurrences are on
+  the *same* criterion, `missing_precondition` (confidences 0.82, 0.90,
+  0.81, 0.83 on `clear_login`, `vague_fast`, `vague_checkout_ux`,
+  `vague_error_handling` respectively). Not scattered noise — Laya is
+  both the least accurate and the most overconfident specifically on
+  that one criterion.
+- **Determinism:** all 32 (requirement, criterion) pairs exactly
+  repeatable across 3 runs each — confirms the expected non-autoregressive,
+  no-sampling behavior; a genuine point in Laya's favor.
+- **Latency:** Laya warm mean 1.44s per call answering all 4 criteria at
+  once (~0.36s/criterion) vs. baseline's 3.01s per single-criterion call
+  — Laya is meaningfully cheaper/faster per criterion, consistent with
+  the original pitch.
+- **The earlier single-criterion spot check generalized, not a fluke:**
+  on the contested `middle` text, Laya again read the numeric "under 2
+  seconds" threshold as *not* measurable, confidently (`has_measurable_
+  condition` p=0.08, confidence=0.92) — same direction and same
+  confident-wrongness as the original 3-point probe that motivated
+  building this full script in the first place.
+
+**Addendum, same day — checked whether we ran Laya wrong before trusting
+the accuracy numbers above, not just assumed the setup was fine:**
+prompted by "are we using Laya wrong, full fp16 or quantized?" Read the
+actual installed source (`laya/agent.py`, `laya/common.py`), not the
+package's marketing copy or docstrings alone.
+- **No quantization path exists anywhere in this library.** Searched the
+  whole `laya` source for int8/bitsandbytes/quantization handling —
+  there is none. Not a lever we failed to pull; it isn't offered.
+- **We ran full fp32 compute, not fp16.** The checkpoint's weights are
+  stored on disk as fp16 (`model.safetensors`, confirmed earlier), but
+  `common.py:build_model` never passes a `torch_dtype` when constructing
+  the encoder, so the model's parameters are built in PyTorch's default
+  fp32. `agent.py:335`'s `load_state_dict(weights, strict=True)` then
+  copies the fp16-stored values into those fp32 tensors — an upcast, not
+  a downcast. `agent.py:392-407`'s device/dtype policy only enables
+  fp16/bf16 autocast on CUDA or MPS; on our CPU-only machine `self.dtype`
+  stays `torch.float32` and `amp_enabled=False` unless `LAYA_CPU_AMP=bf16`
+  is set explicitly, which our script didn't set. So this run used *more*
+  numerical precision than the checkpoint's native fp16 format, not less
+  — precision loss does not explain the 61% vs. 96% accuracy gap.
+- **Other usage checked and found correct, not a fallback/degraded path:**
+  `Router.predict`'s signature explicitly types `state` as `str | dict |
+  list` — passing the raw requirement string directly (what the script
+  does) is a first-class documented input, not a workaround. Question
+  primitive (`noul`) and checkpoint (`english`, auto-routed) both match
+  the reasoning already recorded above. The one thing genuinely not
+  exercised is batched inference (`predict_batch`/`route_batch`) instead
+  of looping single `predict()` calls — a throughput question, not an
+  accuracy one; it doesn't change what the model computes per item.
+- **Working hypothesis for the gap, architectural rather than a setup
+  bug:** `missing_precondition`'s phrasing ("fail to state an explicit
+  trigger...") is a double-negative-style judgment a small classifier
+  head may just handle worse than an LLM does, independent of precision.
+  Untested — would need the reworded-question experiment noted below to
+  confirm.
+
+**Decision (draft — for your review, not yet final):** the accuracy gap
+(61% vs. 96%) plus a concentrated, overconfident failure mode on
+`missing_precondition` reads as a real result against adopting Laya as a
+replacement or complement for `score_testability` right now — same bar
+the Instructor experiment used ("a measured result decides, not 'should
+work'"). Determinism and per-call latency are real, measured points in
+Laya's favor if this is ever revisited, e.g. narrowed to the 3 criteria
+it scored better on, or with `missing_precondition`'s question reworded
+(which would reopen the fairness-constraint tradeoff this run
+deliberately avoided).
+
+**Branch disposition (draft, pending your call):** by the same pattern as
+`experiment/instructor-scoring` — likely keep `experiment/laya-scoring`
+as the historical record (script + this write-up), not merged into
+`main`, not deleted. No shared-venv cleanup needed this time, since this
+worktree's `.venv` was isolated from the start.
+
+**Raw files:** `scratch/scratch_laya_scoring.py` (new, untracked),
+`scratch/laya_run_output.log` (new, untracked — full run output behind
+the SUMMARY above), `requirements.txt` (modified — `laya` appended,
+last line). None committed; per CLAUDE.md, Claude does not run
+`git add`/`commit`/`push` here.
