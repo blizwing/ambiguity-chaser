@@ -1,4 +1,9 @@
+import hashlib
+import sys
+
+from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import StateGraph, START, END
+from langgraph.types import Command, interrupt
 from pydantic import BaseModel
 from llm_client import call_deepseek_json
 from schemas import (
@@ -18,6 +23,7 @@ class GraphState(BaseModel):
     testability_score: int | None = None
     testability_detail: dict | None = None
     clarifying_questions: list[str] | None = None
+    human_answer: str | None = None
 
 
 with open("prompts/testcase_v1.txt", mode="r", encoding="utf-8") as f:
@@ -46,11 +52,18 @@ def score_testability(state: GraphState) -> dict:
 def route_by_testability(state: GraphState) -> str:
     if state.testability_score is not None and state.testability_score >= TESTABILITY_THRESHOLD:
         return "generate_test_case"
-    return "ask_clarifying_questions"
+    return "generate_questions"
 
 
 def generate_test_case(state: GraphState) -> dict:
-    prompt = TESTCASE_PROMPT.format(requirement=state.requirement)
+    requirement = state.requirement
+    if state.human_answer:
+        # Post-resume path: fold the human's answer in as clarifying
+        # context rather than re-scoring (that's Week 10's re-ask loop,
+        # out of scope here — Week 9 proves the pause/resume loop works).
+        requirement = f"{requirement}\nClarification: {state.human_answer}"
+
+    prompt = TESTCASE_PROMPT.format(requirement=requirement)
     result = call_deepseek_json(prompt)
     status, detail = validate_response(result.text, TestCase)
 
@@ -75,7 +88,10 @@ def _describe_issues(detail: dict | None) -> str:
     return "; ".join(issues) if issues else detail["reasoning"]
 
 
-def ask_clarifying_questions(state: GraphState) -> dict:
+def generate_questions(state: GraphState) -> dict:
+    """The 'expensive' half — LLM call, completes fully before any
+    interrupt. Split out from ask_human so this never re-runs on resume
+    (SESSION 4 finding: an interrupted node re-runs from its start)."""
     issues = _describe_issues(state.testability_detail)
     prompt = QUESTIONS_PROMPT.format(requirement=state.requirement, issues=issues)
     result = call_deepseek_json(prompt)
@@ -91,11 +107,26 @@ def ask_clarifying_questions(state: GraphState) -> dict:
     return {"status": status, "clarifying_questions": None}
 
 
+def route_after_questions(state: GraphState) -> str:
+    """If question generation itself failed, stop rather than interrupting
+    with nothing real to show a human — same fail-safe discipline as
+    score_testability forcing 0 on its own invalid output."""
+    return "ask_human" if state.status == "valid" else "end"
+
+
+def ask_human(state: GraphState) -> dict:
+    """Nothing but the interrupt — the SESSION 4 split. Re-runs from the
+    top on every resume, but there's nothing costly here to repeat."""
+    answer = interrupt(state.clarifying_questions)
+    return {"human_answer": answer}
+
+
 # Graph
 builder = StateGraph(GraphState)
 builder.add_node("score_testability", score_testability)
 builder.add_node("generate_test_case", generate_test_case)
-builder.add_node("ask_clarifying_questions", ask_clarifying_questions)
+builder.add_node("generate_questions", generate_questions)
+builder.add_node("ask_human", ask_human)
 
 builder.add_edge(START, "score_testability")
 builder.add_conditional_edges(
@@ -103,18 +134,68 @@ builder.add_conditional_edges(
     route_by_testability,
     {
         "generate_test_case": "generate_test_case",
-        "ask_clarifying_questions": "ask_clarifying_questions",
+        "generate_questions": "generate_questions",
     },
 )
+builder.add_conditional_edges(
+    "generate_questions",
+    route_after_questions,
+    {"ask_human": "ask_human", "end": END},
+)
+builder.add_edge("ask_human", "generate_test_case")
 builder.add_edge("generate_test_case", END)
-builder.add_edge("ask_clarifying_questions", END)
-compiled = builder.compile()
+
+
+# thread_id derivation, Pratham's call: a deterministic hash of the
+# requirement text, so the same requirement string always resumes the
+# same paused thread without the caller having to track an id separately.
+# Known tradeoff, accepted: two identical requirement strings submitted
+# as separate runs collide onto the same thread.
+def thread_id_for(requirement: str) -> str:
+    return hashlib.sha256(requirement.encode()).hexdigest()[:16]
+
+
+DB_PATH = "graph_state.db"
+
+
+def _config_for(requirement: str) -> dict:
+    thread_id = thread_id_for(requirement)
+    print("thread_id:", thread_id)
+    return {"configurable": {"thread_id": thread_id}}
+
+
+def start_run(requirement: str):
+    with SqliteSaver.from_conn_string(DB_PATH) as checkpointer:
+        graph = builder.compile(checkpointer=checkpointer)
+        return graph.invoke({"requirement": requirement}, config=_config_for(requirement))
+
+
+def peek(requirement: str):
+    with SqliteSaver.from_conn_string(DB_PATH) as checkpointer:
+        graph = builder.compile(checkpointer=checkpointer)
+        snapshot = graph.get_state(_config_for(requirement))
+        return snapshot.values, snapshot.next, snapshot.interrupts
+
+
+def resume_run(requirement: str, answer: str):
+    with SqliteSaver.from_conn_string(DB_PATH) as checkpointer:
+        graph = builder.compile(checkpointer=checkpointer)
+        return graph.invoke(Command(resume=answer), config=_config_for(requirement))
+
 
 if __name__ == "__main__":
-    clear_result = compiled.invoke(
-        {"requirement": "The system must lock a user account after 5 failed login attempts."}
-    )
-    print("CLEAR REQUIREMENT:", clear_result)
+    mode = sys.argv[1] if len(sys.argv) > 1 else "start"
+    requirement_arg = sys.argv[2] if len(sys.argv) > 2 else "The system should be fast."
 
-    vague_result = compiled.invoke({"requirement": "The system should be fast."})
-    print("VAGUE REQUIREMENT:", vague_result)
+    if mode == "start":
+        print("RESULT AFTER START:", start_run(requirement_arg))
+    elif mode == "peek":
+        values, next_nodes, interrupts = peek(requirement_arg)
+        print("STATE SNAPSHOT:", values)
+        print("PENDING NEXT NODE(S):", next_nodes)
+        print("PENDING INTERRUPTS:", interrupts)
+    elif mode == "resume":
+        answer_arg = sys.argv[3] if len(sys.argv) > 3 else "no additional context"
+        print("RESULT AFTER RESUME:", resume_run(requirement_arg, answer_arg))
+    else:
+        raise ValueError(f"unknown mode: {mode}")
