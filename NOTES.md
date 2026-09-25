@@ -902,3 +902,139 @@ worktree's `.venv` was isolated from the start.
 the SUMMARY above), `requirements.txt` (modified — `laya` appended,
 last line). None committed; per CLAUDE.md, Claude does not run
 `git add`/`commit`/`push` here.
+
+## Aside — Laya fine-tuning, 3 rounds (26 Sep 2026), follow-up to the zero-shot aside above
+
+**Goal:** the zero-shot aside above left Laya's accuracy gap (61% vs.
+baseline's 96%) unresolved as "against adopting Laya right now," with a
+carried-over caveat from the vendor's own numbers: base Laya checkpoints
+are near-chance zero-shot but reach 0.766 after fine-tuning on the
+vendor's own typed-decisions benchmark (vs. 0.362 zero-shot on that same
+benchmark). This session tests whether the same jump holds on *our*
+schema, not a generic benchmark — closing the loop the zero-shot aside
+left open, per the vendor's own framing ("Laya is a fast base to
+specialise, not a zero-shot decision engine").
+
+**Setup, done this session (see `HANDOVER.md` for the full blow-by-blow —
+not duplicated here):**
+- JarvisLabs ruled out as a compute option — auth fine, but zero live GPU
+  inventory confirmed two independent ways (buggy `jl gpus` listing *and*
+  the create endpoint itself refusing all 6 region/VM/container
+  combinations). Not a bug in our setup; reported upstream as a
+  client/backend contract mismatch worth filing.
+- Google Colab MCP (`googlecolab/colab-mcp`, verified against the real
+  GitHub org before installing) set up at **user** MCP scope — same
+  reasoning as the CLAUDE.md rule about not writing external server
+  config into the public repo's `.mcp.json`. Live browser connection made
+  this session; confirmed it's a **proxy**, not a headless API — GPU
+  selection and file transfer both have to go through code cells (no
+  dedicated MCP tool for either), and Colab's `files.download()` turned
+  out **unreliable at ~1.5GB scale** (silently no-ops some of the time,
+  works other times — not deterministic; a Drive-mount fallback exists if
+  needed, but Pratham's preference is to keep retrying the browser
+  download first).
+- Notebook adapted from the vendor's own
+  `laya_finetune_typed_decisions_2xT4_kaggle.ipynb` reference (fetched
+  and read, not guessed): same RLCD algorithm (GRPO-style group baseline,
+  strictly-proper-scoring-rule reward, encoder/head differential LR,
+  cosine schedule, sigma decay, post-training temperature calibration),
+  with `torch.distributed`/`DDP`/`torchrun` stripped since our dataset
+  (~200 items) is ~25x smaller than the vendor's and one T4 is plenty.
+  Confirmed T4 (15360MiB) attached via `nvidia-smi` before training.
+- **`missing_precondition` switched from `noul` to `choice`** for
+  fine-tuning (open question the zero-shot aside deliberately left
+  unresolved) — explicit decision with Pratham, not defaulted: the
+  zero-shot variant test already showed `choice` fixes `noul`'s
+  documented label-anchoring bug on this exact criterion, and
+  fine-tuning has no fairness-constraint reason to keep inheriting a
+  known bug. Other 3 criteria stayed `noul`, wording verbatim from
+  `scratch/scratch_laya_scoring.py`.
+- Crisp one-hot targets built directly from our hand-labeled JSONL
+  (`build_training_item()`, new in the notebook) — not the vendor's
+  multi-teacher soft-agreement distributions, since we have single
+  ground-truth booleans, not teacher-agreement counts.
+
+**Found — 3 rounds, each a real run against the held-out
+`finetune_holdout_deepseek_labels.jsonl` (39 texts, 156 checks, labels
+from the real unmodified `call_deepseek_json` + `validate_response`
+path, a different source than every round's training labels):**
+
+| | measurable_cond | vague_qual | ambiguous_scope | missing_precond | **Overall** | ECE |
+|---|---|---|---|---|---|---|
+| Zero-shot (GPU, from aside above) | — | — | — | 29% | **57%** | — |
+| Round 1 (168 items, 15 epochs) | 79% | 97% | 90% | 77% | **86%** | 0.080 |
+| Round 2 (199 items, 15 epochs) | 90% | 95% | 90% | 74% | **87%** | 0.064 |
+| Round 3 (199 items, 8 epochs) | 82% | 97% | 92% | 82% | **88%** | 0.103 |
+
+- **Round 1 → Round 2:** added 31 Claude-authored examples targeting two
+  gaps found by reading round 1's actual 22 held-out misses (not
+  guessed): `has_measurable_condition` confidently under-detects
+  *concrete state changes with no literal number* (e.g. "must be
+  reviewed by a human agent" — training skewed toward numeric
+  thresholds), and `has_ambiguous_scope` under-detects *vague operational
+  verbs* (archive, flag, merge, route...). The `has_measurable_condition`
+  fix worked exactly as hypothesized (+11pt). The `ambiguous_scope` fix
+  didn't move the aggregate number. `missing_precondition` dipped
+  slightly (77%→74%) — likely noise on a 39-item set, or dilution from
+  more `choice`-type training diversity. New examples checked for zero
+  overlap with the held-out eval texts before training (asserted in the
+  notebook, not just assumed).
+- **Round 2's real problem wasn't the accuracy number — it was
+  overfitting.** Loss hit exactly 0.0 by epoch 14, and **both**
+  calibration temperatures clamped at the fitter's own max (10.0),
+  meaning the model was maximally overconfident on calibration items it
+  never trained on. That's what motivated Round 3.
+- **Round 2 → Round 3:** single-variable, hypothesis-driven change
+  (epochs 15→8; round 2's own per-epoch log showed loss already at 0.12
+  by epoch 8, well before full memorization). Result: best overall
+  accuracy (88%) and the most balanced per-criterion spread (nothing
+  below 82%) of all 3 rounds — but **ECE got worse, not better** (0.064 →
+  0.103), the opposite of the calibration hypothesis. Real, non-obvious
+  trade-off: less raw overfitting (the `choice` temperature un-clamped,
+  5.31 vs. 10.0) bought accuracy and balance, not better calibration.
+  `noul`'s temperature stayed near the clamp ceiling (9.6) across every
+  round — a standing signal that the `noul` head specifically runs very
+  overconfident on this task/dataset scale, independent of epoch count.
+- **Ceiling isn't just about the model.** Reading the actual misses
+  (not just the aggregate rate) found several "errors" that are
+  arguably noisy gold labels, not model mistakes — e.g. DeepSeek marks
+  *"archive conversations older than 180 days"* and *"...over their
+  first week"* as `missing_precondition=True` despite both containing
+  what reads like an explicit trigger/bound. Same pattern Week 8 already
+  found in the baseline (self-disagreement on the contested `middle`
+  case). A classifier chasing 100% agreement with a labeler that
+  disagrees with itself at the margins is chasing an eval-set artifact,
+  not a real capability gap — the realistic target is DeepSeek's own
+  ceiling (96-100%), not 100%.
+
+**Decision:** keep the **Round 3 checkpoint** (88% overall, best
+per-criterion balance, no criterion below 82%) as "the" fine-tuned
+model — downloaded locally to
+`Downloads/laya_finetuned_testability(1).zip` (distinct filename from
+round 1's earlier download, same OUTPUT_DIR path reused across rounds).
+Whether to push it to HF Hub is still explicitly Pratham's call, per
+`HANDOVER.md` step 8 — the notebook's push cell exists but is gated
+`PUSH_TO_HF = False` by default and was not run this session. This
+reads as a real, positive result for Laya fine-tuning specifically
+(zero-shot 57% → fine-tuned 88%, closing most but not all of the gap to
+the 96-100% baseline) — a different conclusion from the zero-shot
+aside's "against adopting Laya right now," worth revisiting the
+`score_testability` replace/complement question against, but that's a
+separate decision from this session's scope.
+
+**Branch disposition:** same as the zero-shot aside — keep
+`experiment/laya-scoring` as the historical record, not merged into
+`main`. `HANDOVER.md` in this worktree has now served its purpose (all
+10 "Next steps" items complete); worth Pratham's call on whether to
+delete it or leave it as a record of how this session was resumed.
+
+**Raw files (this session):** `scratch/finetune_dataset_claude_v1.jsonl`,
+`scratch/finetune_dataset_claude_v2_additions.jsonl` (new, the 31
+gap-targeted examples), `scratch/finetune_holdout_texts.txt`,
+`scratch/finetune_holdout_deepseek_labels.jsonl`,
+`scratch/build_holdout_labels.py`, `scratch/scratch_laya_choice_variant.py`,
+`scratch/laya_gpu_run_output.log`, `scratch/laya_finetune_colab.ipynb`
+(new — reconstructed from the live Colab session's cells, the exact code
+behind all 3 rounds' numbers above), `HANDOVER.md` (all new/modified,
+untracked or already-untracked). None committed; per CLAUDE.md, Claude
+does not run `git add`/`commit`/`push` here.
