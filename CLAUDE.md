@@ -119,6 +119,22 @@ work in this one.
   found staged or already committed, stop and flag it to Pratham rather
   than silently fixing or force-pushing over it — history rewrites need
   his explicit call.
+- **Public-repo precautions extend to third-party tools/services, not just
+  `git` (added 26 Sep 2026).** Same "this repo is public" reasoning as
+  above, applied wherever data or execution crosses outside this machine:
+  - **MCP servers that execute external code** (e.g. `uvx`/`npx` pulling
+    straight from a git URL, as with the Colab MCP setup) — only add ones
+    from a verified/official source (confirmed against the vendor's own
+    repo/org, not just a search result), and prefer the narrowest useful
+    `claude mcp add` scope. Personal dev tools with no project-specific
+    config belong at `user` scope, not `project` — `project` scope writes
+    to `.mcp.json`, which is committed and would publish the server config
+    (and any args/env passed to it) to the public repo.
+  - **Anything uploaded to an external service** (Colab, Drive, HF Hub,
+    JarvisLabs, etc.) — treat it as potentially as public as this repo.
+    Check scratch/training-data files for secrets or real personal data
+    before they leave the machine, same as the git-staging check above,
+    even though the destination isn't git.
 
 ## Known open question — RESOLVED 13 Sep 2026
 Was: whether `eval-harness`'s stricter commit-workflow rule (give commands
