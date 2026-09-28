@@ -1038,3 +1038,127 @@ gap-targeted examples), `scratch/finetune_holdout_texts.txt`,
 behind all 3 rounds' numbers above), `HANDOVER.md` (all new/modified,
 untracked or already-untracked). None committed; per CLAUDE.md, Claude
 does not run `git add`/`commit`/`push` here.
+
+---
+
+## Week 10 — Re-ask loop + max-iteration guard (28 Sep 2026)
+
+**Goal:** close the gap Week 9 deliberately left open — the resume path
+folded the human's answer into the requirement text but routed straight
+to `generate_test_case` without re-scoring, so a clarification that
+didn't actually resolve the ambiguity produced a spec anyway. Week 10:
+re-score after every answer, loop back to ask again if it's still below
+threshold, bounded so it can't cycle forever.
+
+**Workflow note:** a "Claude scaffolds, Pratham reviews" day, per the
+CLAUDE.md daily-workflow convention — treated as plumbing extending the
+already-proven interrupt/resume mechanics rather than a new judgment
+call. One design call was made unilaterally for scaffolding purposes and
+flagged for review rather than asked up front: what happens when the
+guard is exhausted. First pass (built and tested, see below) tagged a
+best-effort spec instead of refusing outright. The end-of-day
+understanding check surfaced that this was the wrong call — Pratham
+caught, unprompted, that a `best_effort`-tagged spec is only honest in
+theory: nothing downstream actually reads `status` and branches on it,
+so in practice it behaves exactly like the fabrication P1 warned
+against, just with an unread label attached. Corrected same day (see
+"Correction" below) before this entry was finalized — the "Done"/"Found"
+sections describe the corrected design, not the first pass.
+
+**Done:**
+- `GraphState` gained `reask_count: int` and `human_answers: list[str]`
+  (replacing the old singular `human_answer`). The list, not a single
+  string, matters: with re-asking, a second round must not drop the
+  first round's answer — caught this during design, before writing the
+  loop, not found as a bug afterward.
+- `score_testability` now folds every accumulated clarification into the
+  requirement text before re-scoring (`_fold_in_clarifications`, shared
+  with `generate_test_case` so both nodes stay consistent on what the
+  model actually sees).
+- `route_by_testability` gained the guard: score clears threshold ->
+  `generate_test_case`; score fails and `reask_count < MAX_REASK_ITERATIONS`
+  (set to 2 — initial ask + one re-ask) -> back to `generate_questions`;
+  score fails and the guard's exhausted -> a new terminal node,
+  `mark_unresolved` (see "Correction" below) — no LLM call, no spec, just
+  `status: "needs_escalation"`. `generate_test_case` is now only ever
+  reached via a clean testability pass, which let the `below_threshold`
+  tagging logic in it come back out — simpler code as a direct
+  consequence of the corrected design, not a separate cleanup.
+- Rewired `ask_human -> generate_test_case` to `ask_human ->
+  score_testability`, making this a real loop for the first time.
+  `ask_human` now increments `reask_count` and appends to
+  `human_answers` rather than overwriting.
+
+**Correction, same day, from the end-of-day understanding check:** the
+first pass had guard-exhausted routing to `generate_test_case` anyway,
+tagged `status: "best_effort"`. Reasoning at the time: a labeled
+best-effort spec is honest, not fabrication, same discipline as P1's
+`ScoreIntegrityError` (don't silently claim confidence you don't have).
+Pratham's objection, unprompted: that discipline only holds if something
+downstream actually reads `status` and treats `"best_effort"`
+differently from `"valid"` — nothing in this repo does, so in practice
+it's indistinguishable from the exact fabrication P1 warned against,
+just with an unread flag attached. His proposed fix, framed around a
+concrete batch scenario (10 requirements, two trigger re-ask, one
+clarifies cleanly and proceeds, one doesn't and needs a different,
+more-authoritative human than whoever answered so far): don't emit a
+spec at all on guard-exhaustion — mark the requirement unresolved and
+let it sit, without blocking any other requirement's independent
+progress. That last part (other requirements not blocking) turned out
+to already be true architecturally — each requirement is its own
+`thread_id`, so this needed no change — but the guard-exhausted routing
+itself did, and got fixed on the spot (`mark_unresolved` node, `graph.py`).
+Kept as a real example of the understanding check doing its job: this
+wasn't rubber-stamping a scaffolded decision, it caught something Claude
+got wrong and Claude's own stated principle (P1's fabrication rule)
+should have caught but didn't apply rigorously enough to its own tagging
+scheme.
+
+**Found — separate process invocations, first pass (report/formatting
+requirement) then re-verified after the correction (dashboard/user-
+friendly requirement):**
+- Round 1: scored 0, asked several real clarifying questions, interrupted.
+- Resumed with a still-vague answer ("It should have good formatting." /
+  "It should be easy to use.") — re-scored (still 0, `reasoning`
+  explicitly names both the original and the new vague term as
+  unquantified), `reask_count` went to 1, asked a second real round of
+  questions, interrupted again. This is the loop actually firing, not
+  just routing logic that looks right on paper.
+- Resumed a second time with another vague answer — guard exhausted
+  (`reask_count` hit 2). Post-correction: `status` came back
+  `"needs_escalation"`, `test_case` didn't even appear in the returned
+  state (never set — `generate_test_case` was never invoked on this
+  path), and `human_answers` held both answers, not just the second —
+  confirms both the list-accumulation fix and the corrected
+  guard-exhausted routing work cross-process, not just in reasoning about
+  the state model. (Pre-correction, this same scenario had produced a
+  real `TestCase` tagged `"best_effort"` instead — never committed, so
+  not preserved anywhere beyond this note; superseded before anything
+  landed in git.)
+- A separate run against "The system should be fast." hit
+  `generate_questions` returning invalid JSON on its second call (a live
+  model hiccup, unrelated to this session's code) — `route_after_questions`'s
+  existing fail-safe (Week 9) correctly routed to `END` instead of
+  interrupting with nothing real to show, rather than the new guard logic
+  papering over it. Confirms the fail-safes (Week 9's and Week 10's)
+  compose correctly instead of one masking the other.
+
+**Why this matters going forward:** the agent no longer emits a spec off
+an answer that didn't actually help — it tries again, once, before
+admitting it's stuck, and when it's stuck it says so with nothing
+fabricated, not even a labeled guess. That's a straight line to Week 11
+(coverage-check tool calling, next per `ROADMAP.md`): `needs_escalation`
+items are exactly the set a future batch/queue view would need to
+surface separately from clean passes.
+
+**Checkpoint met:** a second question round fires on an unresolved
+clarification, and the guard being hit produces `needs_escalation` with
+no test case at all — not an infinite loop, not a silently-confident
+spec, not even an honestly-labeled one — all verified by direct
+execution, not just reasoning about the routing table.
+
+**Raw files:** `graph.py` (modified — state fields, loop wiring, guard,
+`mark_unresolved` terminal node) — not yet committed. `README.md`'s
+"Status" section is now stale (still says "Week 9 in progress, 23 Sep")
+— flagged, not fixed, since that's a docs pass, not part of today's
+scope.

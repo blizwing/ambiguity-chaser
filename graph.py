@@ -4,7 +4,7 @@ import sys
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import Command, interrupt
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from llm_client import call_deepseek_json
 from schemas import (
     TestCase,
@@ -16,6 +16,9 @@ from schemas import (
 )
 
 
+MAX_REASK_ITERATIONS = 2
+
+
 class GraphState(BaseModel):
     requirement: str
     status: str | None = None
@@ -23,7 +26,11 @@ class GraphState(BaseModel):
     testability_score: int | None = None
     testability_detail: dict | None = None
     clarifying_questions: list[str] | None = None
-    human_answer: str | None = None
+    # A list, not a single string: with re-asking (Week 10), a second round
+    # must not drop the first round's answer, so every answer accumulates
+    # rather than overwriting.
+    human_answers: list[str] = Field(default_factory=list)
+    reask_count: int = 0
 
 
 with open("prompts/testcase_v1.txt", mode="r", encoding="utf-8") as f:
@@ -36,8 +43,18 @@ with open("prompts/clarifying_questions_v1.txt", mode="r", encoding="utf-8") as 
     QUESTIONS_PROMPT = f.read()
 
 
+def _fold_in_clarifications(requirement: str, answers: list[str]) -> str:
+    lines = "\n".join(f"Clarification: {answer}" for answer in answers)
+    return f"{requirement}\n{lines}" if answers else requirement
+
+
 def score_testability(state: GraphState) -> dict:
-    prompt = SCORE_PROMPT.format(requirement=state.requirement)
+    # Re-ask loop (Week 10): re-score with every clarification gathered so
+    # far folded in — a requirement that was ambiguous the first time
+    # doesn't get graded on the original text alone once clarified.
+    requirement = _fold_in_clarifications(state.requirement, state.human_answers)
+
+    prompt = SCORE_PROMPT.format(requirement=requirement)
     result = call_deepseek_json(prompt)
     status, detail = validate_response(result.text, TestabilityScore)
 
@@ -52,24 +69,38 @@ def score_testability(state: GraphState) -> dict:
 def route_by_testability(state: GraphState) -> str:
     if state.testability_score is not None and state.testability_score >= TESTABILITY_THRESHOLD:
         return "generate_test_case"
+    if state.reask_count >= MAX_REASK_ITERATIONS:
+        # Guard exhausted: two rounds of clarification and it's still not
+        # testable. Per the P1 non-fabrication principle, don't emit a
+        # spec anyway — route to a human with more authority than whoever
+        # answered so far, instead of guessing.
+        return "mark_unresolved"
     return "generate_questions"
 
 
 def generate_test_case(state: GraphState) -> dict:
-    requirement = state.requirement
-    if state.human_answer:
-        # Post-resume path: fold the human's answer in as clarifying
-        # context rather than re-scoring (that's Week 10's re-ask loop,
-        # out of scope here — Week 9 proves the pause/resume loop works).
-        requirement = f"{requirement}\nClarification: {state.human_answer}"
+    # Post-resume path: fold every clarification gathered in as context for
+    # spec generation (score_testability folds the same list in separately,
+    # for its own re-scoring pass). Only reached via a clean testability
+    # pass — the guard-exhausted case routes to mark_unresolved instead.
+    requirement = _fold_in_clarifications(state.requirement, state.human_answers)
 
     prompt = TESTCASE_PROMPT.format(requirement=requirement)
     result = call_deepseek_json(prompt)
     status, detail = validate_response(result.text, TestCase)
 
-    if status == "valid":
-        return {"status": status, "test_case": detail.model_dump()}
-    return {"status": status, "test_case": None}
+    if status != "valid":
+        return {"status": status, "test_case": None}
+    return {"status": status, "test_case": detail.model_dump()}
+
+
+def mark_unresolved(state: GraphState) -> dict:
+    """Guard-exhausted terminal state (Week 10, corrected): no test case,
+    no LLM call — just a status a caller can filter on to route this
+    requirement to a human with more authority than whoever answered so
+    far. clarifying_questions and human_answers stay in state so whoever
+    picks it up next has the full history, not a blank slate."""
+    return {"status": "needs_escalation"}
 
 
 def _describe_issues(detail: dict | None) -> str:
@@ -118,7 +149,10 @@ def ask_human(state: GraphState) -> dict:
     """Nothing but the interrupt — the SESSION 4 split. Re-runs from the
     top on every resume, but there's nothing costly here to repeat."""
     answer = interrupt(state.clarifying_questions)
-    return {"human_answer": answer}
+    return {
+        "human_answers": state.human_answers + [answer],
+        "reask_count": state.reask_count + 1,
+    }
 
 
 # Graph
@@ -127,6 +161,7 @@ builder.add_node("score_testability", score_testability)
 builder.add_node("generate_test_case", generate_test_case)
 builder.add_node("generate_questions", generate_questions)
 builder.add_node("ask_human", ask_human)
+builder.add_node("mark_unresolved", mark_unresolved)
 
 builder.add_edge(START, "score_testability")
 builder.add_conditional_edges(
@@ -135,6 +170,7 @@ builder.add_conditional_edges(
     {
         "generate_test_case": "generate_test_case",
         "generate_questions": "generate_questions",
+        "mark_unresolved": "mark_unresolved",
     },
 )
 builder.add_conditional_edges(
@@ -142,8 +178,9 @@ builder.add_conditional_edges(
     route_after_questions,
     {"ask_human": "ask_human", "end": END},
 )
-builder.add_edge("ask_human", "generate_test_case")
+builder.add_edge("ask_human", "score_testability")
 builder.add_edge("generate_test_case", END)
+builder.add_edge("mark_unresolved", END)
 
 
 # thread_id derivation, Pratham's call: a deterministic hash of the
