@@ -1162,3 +1162,54 @@ execution, not just reasoning about the routing table.
 "Status" section is now stale (still says "Week 9 in progress, 23 Sep")
 — flagged, not fixed, since that's a docs pass, not part of today's
 scope.
+
+
+## Week 11 — Tool calling: coverage check (29 Sep 2026)
+
+**Objective:** before paying to generate a spec, check whether an existing
+test case already covers the requirement. **Checkpoint:** a requirement the
+corpus covers ends as `already_covered` with a real test id; one it doesn't
+proceeds to a spec.
+
+**Built:**
+- `tools.py`: `search_test_cases` (keyword overlap over `test_corpus.json`,
+  10 invented cases, top 3) plus its tool schema. Deliberately dumb —
+  embeddings are Week 12.
+- `call_deepseek_with_tools` in `llm_client.py`. Pratham's first draft
+  raised on `content is None` (the normal shape of a tool-call reply),
+  returned no `tool_calls`, and combined tools with JSON mode. Fixed to
+  return the raw message and finish reason, with no JSON mode.
+- `check_coverage` node in `graph.py`, between a testability pass and
+  `generate_test_case`. Turn 1: the model picks the search query via the
+  tool. Turn 2: a verdict (`CoverageVerdict`) grounded in the real results.
+- `SearchArgs` model so tool-call arguments go through `validate_response`
+  like every other model output.
+
+**Decisions:**
+- **Placement:** after scoring (compares the clarified text) and before
+  spec generation (no cost spent on a spec that gets thrown away).
+- **Search always runs in Python.** `deepseek-flash` sometimes answers
+  without calling the tool (observed), so a missing or malformed tool call
+  falls back to the requirement text as the query.
+- **Integrity check:** a "covered" verdict only counts if the cited id is
+  in the results the search actually returned. Same discipline as P1's
+  `ScoreIntegrityError` — assert on our own output, not just the model's.
+- **Fail-safe direction:** bad model output at any step falls through to
+  `generate_test_case`. A missed duplicate costs less than a requirement
+  dropped because the check itself broke. This covers bad *output* only;
+  an API exception still propagates, same as the other nodes.
+- **No shared LLM-error handler.** `validate_response` already covers JSON
+  and schema errors; what each node does on failure differs by design, and
+  "meaning" checks (invented id, empty questions) are node-specific.
+
+**Verified by execution:** a covered requirement (account lockout) ended
+`already_covered` with `TC-001`; an uncovered one (SMS verification) got a
+real `TestCase`; a near-miss (session timeout at 45 min vs TC-005's 30 min)
+was correctly *not* treated as covered.
+
+**Carry into Week 12:** "no match" will split into "nothing similar" and
+"retrieval broken". Only the first is safe to ignore; keep them separate.
+
+**Not done:** `README.md` "Status" is still stale. Only one tool call is
+handled (`tool_calls[0]`). The tool-result `role: "tool"` round-trip was
+skipped — results are folded into a prompt string instead.

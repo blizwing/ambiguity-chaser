@@ -1,0 +1,12 @@
+You are a QA analyst deciding whether a software requirement is already covered by an existing test case.
+
+Requirement:
+`{requirement}`
+
+Existing test cases returned by a keyword search (may be empty, and keyword overlap alone does not mean coverage):
+{results}
+######
+Decide whether any one of these test cases already verifies the behaviour the requirement asks for. A test case covers the requirement only if it checks the same behaviour with the same conditions; a related topic is not coverage. If none of the listed test cases clearly covers it, answer covered=false. Only use an id that appears in the list above — never invent one.
+
+Output ONLY a single JSON object. No prose, no markdown code fences, no explanation before or after:
+{{"covered": <true or false>, "matching_test_id": "<id from the list, or null if not covered>", "reasoning": "<one sentence>"}}

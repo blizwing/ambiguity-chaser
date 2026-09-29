@@ -36,6 +36,14 @@ class ClarifyingQuestions(BaseModel):
     questions: list[str]
     reasoning: str
 
+class SearchArgs(BaseModel):
+    query: str
+
+
+class CoverageVerdict(BaseModel):
+    covered:bool
+    matching_test_id: str | None
+    reasoning: str
 
 # 86, not 85: soft deductions are -15 each, so one soft failure scores
 # exactly 85. Intent is zero soft failures tolerated, and route_by_testability
