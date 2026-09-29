@@ -1,0 +1,12 @@
+[
+  {"id": "TC-001", "title": "Account lockout after repeated failed logins", "description": "Verify a user account is locked for 15 minutes after 5 consecutive failed login attempts and that the correct password is rejected during the lockout."},
+  {"id": "TC-002", "title": "Password reset email delivery", "description": "Verify a password reset email is sent within 60 seconds of a reset request and the link expires after 24 hours."},
+  {"id": "TC-003", "title": "Export report as CSV", "description": "Verify the monthly sales report can be exported as a CSV file containing all visible columns and the correct row count."},
+  {"id": "TC-004", "title": "Search results pagination", "description": "Verify search results are paginated at 20 items per page and the next and previous controls navigate correctly."},
+  {"id": "TC-005", "title": "Session timeout after inactivity", "description": "Verify an authenticated session expires after 30 minutes of inactivity and the user is redirected to the login page."},
+  {"id": "TC-006", "title": "Upload file size limit", "description": "Verify uploading a file larger than 10 MB is rejected with a clear error message and smaller files are accepted."},
+  {"id": "TC-007", "title": "Shopping cart total calculation", "description": "Verify the cart total equals the sum of item prices multiplied by quantity, including tax, and updates when quantity changes."},
+  {"id": "TC-008", "title": "Email notification preferences", "description": "Verify a user can disable marketing emails in settings and no marketing email is sent afterward while transactional emails still arrive."},
+  {"id": "TC-009", "title": "Role-based access to admin page", "description": "Verify a user without the admin role receives an access denied response when opening the admin dashboard."},
+  {"id": "TC-010", "title": "Dashboard load time", "description": "Verify the main dashboard renders within 3 seconds for an account with 1000 records on a standard broadband connection."}
+]

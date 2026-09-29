@@ -1,19 +1,23 @@
 import hashlib
+import json
 import sys
 
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import Command, interrupt
 from pydantic import BaseModel, Field
-from llm_client import call_deepseek_json
+from llm_client import call_deepseek_json, call_deepseek_with_tools
 from schemas import (
     TestCase,
     TestabilityScore,
     ClarifyingQuestions,
+    CoverageVerdict,
+    SearchArgs,
     TESTABILITY_THRESHOLD,
     compute_testability_score,
     validate_response,
 )
+from tools import SEARCH_TOOL_SCHEMA, search_test_cases
 
 
 MAX_REASK_ITERATIONS = 2
@@ -31,6 +35,7 @@ class GraphState(BaseModel):
     # rather than overwriting.
     human_answers: list[str] = Field(default_factory=list)
     reask_count: int = 0
+    coverage_match: dict | None = None
 
 
 with open("prompts/testcase_v1.txt", mode="r", encoding="utf-8") as f:
@@ -41,6 +46,9 @@ with open("prompts/testability_score_v1.txt", mode="r", encoding="utf-8") as f:
 
 with open("prompts/clarifying_questions_v1.txt", mode="r", encoding="utf-8") as f:
     QUESTIONS_PROMPT = f.read()
+
+with open("prompts/coverage_check_v1.txt", mode="r", encoding="utf-8") as f:
+    COVERAGE_PROMPT = f.read()
 
 
 def _fold_in_clarifications(requirement: str, answers: list[str]) -> str:
@@ -68,7 +76,7 @@ def score_testability(state: GraphState) -> dict:
 
 def route_by_testability(state: GraphState) -> str:
     if state.testability_score is not None and state.testability_score >= TESTABILITY_THRESHOLD:
-        return "generate_test_case"
+        return "check_coverage"
     if state.reask_count >= MAX_REASK_ITERATIONS:
         # Guard exhausted: two rounds of clarification and it's still not
         # testable. Per the P1 non-fabrication principle, don't emit a
@@ -92,6 +100,53 @@ def generate_test_case(state: GraphState) -> dict:
     if status != "valid":
         return {"status": status, "test_case": None}
     return {"status": status, "test_case": detail.model_dump()}
+
+
+def check_coverage(state: GraphState) -> dict:
+    """Week 11 tool calling: ask whether an existing test case already
+    covers this requirement before paying to generate a new spec. Runs on
+    the clarified requirement, after a testability pass.
+
+    Fail-safe direction: any bad model output here (no tool call, bad tool
+    arguments, bad verdict, invented id) falls through to generate_test_case with coverage_match
+    None. A missed duplicate costs less than a requirement silently
+    dropped because the coverage check itself broke."""
+    requirement = _fold_in_clarifications(state.requirement, state.human_answers)
+
+    # Turn 1: the model decides the search query via the tool.
+    message, _ = call_deepseek_with_tools(
+        [{"role": "user", "content": f"Find existing test cases that may already cover this requirement, using the search tool:\n{requirement}"}],
+        [SEARCH_TOOL_SCHEMA],
+    )
+    query = requirement
+    if message.tool_calls:
+        args_status, args = validate_response(message.tool_calls[0].function.arguments, SearchArgs)
+        if args_status == "valid":
+            query = args.query
+        # else: fall back to the requirement text itself as the query
+    # No tool call is a real outcome (observed with deepseek-flash), so the
+    # search still runs in Python rather than trusting the model to look.
+    results = search_test_cases(query)
+
+    # Turn 2: verdict, grounded in the actual search results.
+    prompt = COVERAGE_PROMPT.format(requirement=requirement, results=json.dumps(results, indent=2))
+    result = call_deepseek_json(prompt)
+    status, verdict = validate_response(result.text, CoverageVerdict)
+
+    if status != "valid" or not verdict.covered:
+        return {"coverage_match": None}
+
+    # Integrity check on our own output (P1 ScoreIntegrityError lesson):
+    # the cited id must be one the search actually returned, else the model
+    # invented a match.
+    match = next((tc for tc in results if tc["id"] == verdict.matching_test_id), None)
+    if match is None:
+        return {"coverage_match": None}
+    return {"status": "already_covered", "coverage_match": {**match, "reasoning": verdict.reasoning}}
+
+
+def route_after_coverage(state: GraphState) -> str:
+    return "end" if state.coverage_match is not None else "generate_test_case"
 
 
 def mark_unresolved(state: GraphState) -> dict:
@@ -158,6 +213,7 @@ def ask_human(state: GraphState) -> dict:
 # Graph
 builder = StateGraph(GraphState)
 builder.add_node("score_testability", score_testability)
+builder.add_node("check_coverage", check_coverage)
 builder.add_node("generate_test_case", generate_test_case)
 builder.add_node("generate_questions", generate_questions)
 builder.add_node("ask_human", ask_human)
@@ -168,10 +224,15 @@ builder.add_conditional_edges(
     "score_testability",
     route_by_testability,
     {
-        "generate_test_case": "generate_test_case",
+        "check_coverage": "check_coverage",
         "generate_questions": "generate_questions",
         "mark_unresolved": "mark_unresolved",
     },
+)
+builder.add_conditional_edges(
+    "check_coverage",
+    route_after_coverage,
+    {"generate_test_case": "generate_test_case", "end": END},
 )
 builder.add_conditional_edges(
     "generate_questions",

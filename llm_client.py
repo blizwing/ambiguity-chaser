@@ -76,3 +76,20 @@ def call_deepseek_json(
         stop_reason=response.choices[0].finish_reason,
         model_name=response.model,
     )
+
+def call_deepseek_with_tools(messages, tools, temperature=0):
+    """Calls DeepSeek's OpenAI-compatible endpoint with tools. temperature
+    is always passed explicitly, never left to inherit a library/provider
+    default (P1 Day 23 finding, see CLAUDE.md)."""
+    response = client.chat.completions.create(
+        model=MODEL,
+        messages=messages,
+        max_tokens=MAX_TOKENS,
+        temperature=temperature,
+        stream=False,
+        tools=tools
+    )
+
+    choice = response.choices[0]
+
+    return choice.message, choice.finish_reason
