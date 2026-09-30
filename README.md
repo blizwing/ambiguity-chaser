@@ -13,12 +13,13 @@ judge/generator can't catch a contradiction between two requirements that
 are each individually unambiguous. Full three-phase context and the
 complete Phase 1 build log live in that repo.
 
-## Status (as of 23 Sep 2026)
+## Status (as of 30 Sep 2026)
 
-Weeks 6–8 of the roadmap are built and working; Week 9 (human-in-the-loop
-interrupt/resume) is in progress — the pause/persist/resume mechanics are
-proven in a scratch script (`scratch/scratch_interrupt.py`), not yet wired
-into the real graph below.
+Weeks 6–11 of the roadmap are built and working: the scoring gate,
+human-in-the-loop pause/persist/resume, the re-ask loop with a
+max-iteration guard, and a tool-calling coverage check. Week 12
+(embeddings + retrieval, replacing the keyword search behind the coverage
+check) is next.
 
 ## What's built
 
@@ -26,12 +27,21 @@ into the real graph below.
 requirement
     |
     v
-score_testability  -->  (score >= 86) --> generate_test_case  --> END
+score_testability <-------------------------+
+    |                                        |
+    +-- (score >= 86) --> check_coverage     |
+    |                        |               |
+    |                        +-- covered --> END (already_covered)
+    |                        +-- not covered --> generate_test_case --> END
+    |                                        |
+    +-- (score < 86, re-asks left) --> generate_questions
+    |                                        |
+    |                                   ask_human  (interrupt; state persisted)
+    |                                        |
+    |                                        +--- answer folded in, re-score
     |
-    (score < 86)
-    |
-    v
-ask_clarifying_questions --> END   # will become a real pause once Week 9 lands
+    +-- (score < 86, re-ask guard exhausted) --> mark_unresolved --> END
+                                                  (status: needs_escalation)
 ```
 
 - **`score_testability`** — asks the model to report four boolean facts
@@ -45,10 +55,24 @@ ask_clarifying_questions --> END   # will become a real pause once Week 9 lands
 - **`generate_test_case`** — for requirements that clear the gate, produces
   a validated, structured `TestCase` (title, preconditions, steps, expected
   result, priority).
-- **`ask_clarifying_questions`** — for requirements that don't, asks
-  targeted questions instead of fabricating a spec. Rejects a
-  schema-valid-but-empty response (`questions: []`) as untrustworthy rather
-  than accepting it.
+- **`generate_questions` + `ask_human`** — for requirements that don't
+  clear the gate, asks targeted questions instead of fabricating a spec.
+  Rejects a schema-valid-but-empty response (`questions: []`) as
+  untrustworthy rather than accepting it. Split into two nodes so the LLM
+  call never re-runs on resume: `ask_human` holds only the `interrupt()`,
+  and the checkpointer (SQLite, `graph_state.db`, keyed by a per-requirement
+  `thread_id`) lets the run resume across process restarts.
+- **Re-ask loop** — each human answer is appended to `human_answers`, folded
+  into the requirement, and the requirement is re-scored. After
+  `MAX_REASK_ITERATIONS` (2) rounds without passing, the graph routes to
+  **`mark_unresolved`** (`status: needs_escalation`) instead of emitting a
+  best-effort spec.
+- **`check_coverage`** — before generating a spec, the model uses a
+  `search_test_cases` tool (keyword overlap over `test_corpus.json`) to look
+  for an existing test case that already covers the requirement. A "covered"
+  verdict only counts if the cited test id is one the search actually
+  returned. Bad model output at any step falls through to spec generation:
+  a missed duplicate costs less than a requirement dropped by a broken check.
 - Every LLM response is run through `validate_response` (Pydantic), which
   never raises — malformed model output is expected input here, not a bug.
 
@@ -85,12 +109,14 @@ OpenAI-compatible SDK, for cost reasons.
   judgment feeding the routing decision varies run to run at
   `temperature=0`, not just the generated test case. Not fixed; can only
   be mitigated (e.g. majority-vote-across-N-calls), not eliminated.
-- **`ask_clarifying_questions` currently dead-ends** — it generates
-  questions and the graph just ends. Week 9's actual task is making that a
-  real pause: `interrupt()` + a checkpointer + a per-requirement
-  `thread_id`, so "score → ask → *(human answers later)* → resume →
-  generate real spec" becomes one continuous run instead of two
-  disconnected halves.
+- **Coverage search is keyword-only.** `search_test_cases` matches on word
+  overlap, so a paraphrased requirement with no shared words won't find its
+  existing test case. Week 12 replaces it with embeddings. Only the first
+  tool call is handled (`tool_calls[0]`), and search results are folded into
+  a prompt string rather than sent back as a `role: "tool"` message.
+- **`thread_id` collisions.** The id is a hash of the requirement text, so
+  two identical requirement strings submitted as separate runs share one
+  thread. Accepted tradeoff.
 - **Evaluated and parked: TypeSafe AI's Jev ("System One" model) as a
   faster/cheaper judge for `score_testability`.** Architecturally a
   plausible fit (calibrated typed decisions vs. free-text generation), and
@@ -125,7 +151,10 @@ lives only in `NOTES.md`, keyed by date, never encoded into a filename
 
 - `graph.py` — the LangGraph build described above.
 - `schemas.py` — Pydantic models + scoring/validation logic.
-- `llm_client.py` — DeepSeek API wrapper (JSON-mode calls).
+- `llm_client.py` — DeepSeek API wrapper (JSON-mode and tool-calling).
+- `tools.py` — `search_test_cases` and its tool schema.
+- `test_corpus.json` — invented existing test cases the coverage check
+  searches.
 - `prompts/` — prompt text files, versioned by filename suffix (`_v1`).
 - `scratch/` — throwaway hands-on exercises, not part of the graph.
 - `experiments/` — full standalone write-ups for research spikes (see
