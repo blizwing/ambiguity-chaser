@@ -8,3 +8,5 @@ langgraph
 langgraph-checkpoint-sqlite
 langchain-core
 laya
+fastembed
+numpy

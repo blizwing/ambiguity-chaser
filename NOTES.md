@@ -1213,3 +1213,39 @@ was correctly *not* treated as covered.
 **Not done:** `README.md` "Status" is still stale. Only one tool call is
 handled (`tool_calls[0]`). The tool-result `role: "tool"` round-trip was
 skipped — results are folded into a prompt string instead.
+
+
+## Week 12 — Embeddings + retrieval (3 Oct 2026) — DRAFT, Pratham to review
+
+**Objective:** replace Week 11's keyword search with semantic search, and
+*measure* retrieval instead of trusting it.
+
+**Built:**
+- `retrieval.py`: local `BAAI/bge-small-en-v1.5` via fastembed (DeepSeek has
+  no embeddings endpoint; local adds no vendor or data egress). Corpus
+  embedded once, normalised, cosine = dot product. Query-side bge prefix.
+- `tools.search_test_cases` now calls it; old search kept as
+  `keyword_search` purely as the eval baseline.
+- `evals/retrieval_queries.json` + `evals/retrieval_eval.py`: 21 labeled
+  queries (paraphrase, keyword, near-miss, no-match).
+
+**Measured:** paraphrase recall@1 keyword 0.60 -> semantic 1.00; keyword and
+near-miss queries 1.00 on both. Top-1 cosine: no-match 0.465-0.571,
+paraphrase 0.625-0.687, near-miss/keyword 0.82+.
+
+**Decision:** `MIN_SCORE = 0.60`, the middle of the gap between the highest
+no-match score and the lowest paraphrase score.
+
+**Week 11 carry-over resolved:** "nothing similar" is an empty list;
+"retrieval broken" raises `RetrievalError` and propagates, same as an API
+exception, rather than falling through to "not covered".
+
+**Verified live:** idle-session paraphrase -> `already_covered` TC-005; SMS
+verification -> no match; 45-min timeout near-miss -> not covered.
+
+**Caveats:** corpus is 10 cases and the eval set 21 hand-written queries, so
+the 0.55-0.62 gap is narrow and likely to shrink on a few hundred cases;
+re-run the eval whenever the corpus or model changes. I (Claude) wrote the
+eval queries, so they share my phrasing habits — Pratham should add some of
+his own. Missing `langgraph-checkpoint-sqlite` was installed into the venv
+(already in requirements.txt).

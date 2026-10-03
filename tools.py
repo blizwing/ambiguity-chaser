@@ -7,6 +7,8 @@ search; embeddings are Week 12's job, so this is intentionally dumb.
 import json
 import re
 
+import retrieval
+
 with open("test_corpus.json", mode="r", encoding="utf-8") as f:
     TEST_CORPUS = json.load(f)
 
@@ -25,9 +27,9 @@ def _words(text: str) -> set[str]:
     return set(re.findall(r"[a-z0-9]+", text.lower())) - STOPWORDS
 
 
-def search_test_cases(query: str) -> list[dict]:
-    """Rank corpus entries by number of shared words with the query, return
-    the top 3 with at least one shared word. Empty list means no match."""
+def keyword_search(query: str) -> list[dict]:
+    """Week 11 keyword-overlap search, kept as the baseline that
+    evals/retrieval_eval.py measures embeddings against."""
     query_words = _words(query)
     scored = []
     for tc in TEST_CORPUS:
@@ -36,6 +38,13 @@ def search_test_cases(query: str) -> list[dict]:
             scored.append((overlap, tc))
     scored.sort(key=lambda pair: pair[0], reverse=True)
     return [tc for _, tc in scored[:3]]
+
+
+def search_test_cases(query: str) -> list[dict]:
+    """Semantic search (Week 12). Empty list = nothing similar enough.
+    Raises retrieval.RetrievalError if retrieval itself is broken; callers
+    must not treat that as 'no match'."""
+    return retrieval.search(query)
 
 
 SEARCH_TOOL_SCHEMA = {

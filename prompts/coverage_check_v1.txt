@@ -3,7 +3,7 @@ You are a QA analyst deciding whether a software requirement is already covered 
 Requirement:
 `{requirement}`
 
-Existing test cases returned by a keyword search (may be empty, and keyword overlap alone does not mean coverage):
+Existing test cases returned by a semantic search, each with a similarity score (may be empty; similarity alone does not mean coverage, e.g. the same topic with different numbers is not coverage):
 {results}
 ######
 Decide whether any one of these test cases already verifies the behaviour the requirement asks for. A test case covers the requirement only if it checks the same behaviour with the same conditions; a related topic is not coverage. If none of the listed test cases clearly covers it, answer covered=false. Only use an id that appears in the list above — never invent one.

@@ -1,0 +1,26 @@
+[
+  {"kind": "paraphrase", "query": "Block an account temporarily when someone keeps entering the wrong credentials", "expected": "TC-001"},
+  {"kind": "paraphrase", "query": "Customers who forget their credentials must get a recovery message quickly", "expected": "TC-002"},
+  {"kind": "paraphrase", "query": "Finance staff need to download the monthly revenue figures into a spreadsheet-friendly file", "expected": "TC-003"},
+  {"kind": "paraphrase", "query": "Long lists of hits are split across multiple screens with next/back navigation", "expected": "TC-004"},
+  {"kind": "paraphrase", "query": "Idle logged-in users are signed out automatically", "expected": "TC-005"},
+  {"kind": "paraphrase", "query": "Oversized attachments are refused with an explanatory message", "expected": "TC-006"},
+  {"kind": "paraphrase", "query": "The basket subtotal and VAT must stay correct when the shopper changes how many they want", "expected": "TC-007"},
+  {"kind": "paraphrase", "query": "People can opt out of promotional mail but still get order receipts", "expected": "TC-008"},
+  {"kind": "paraphrase", "query": "Non-administrators must be blocked from the management console", "expected": "TC-009"},
+  {"kind": "paraphrase", "query": "The landing page should appear quickly even for large accounts", "expected": "TC-010"},
+
+  {"kind": "keyword", "query": "Lock the account for 15 minutes after 5 failed login attempts", "expected": "TC-001"},
+  {"kind": "keyword", "query": "Session expires after 30 minutes of inactivity and redirects to login", "expected": "TC-005"},
+  {"kind": "keyword", "query": "Export the sales report as a CSV file", "expected": "TC-003"},
+
+  {"kind": "near_miss", "query": "Session expires after 45 minutes of inactivity", "expected": "TC-005"},
+  {"kind": "near_miss", "query": "Lock the account for 30 minutes after 3 failed login attempts", "expected": "TC-001"},
+  {"kind": "near_miss", "query": "Reject uploads larger than 25 MB", "expected": "TC-006"},
+
+  {"kind": "no_match", "query": "Users can pay with Apple Pay at checkout", "expected": null},
+  {"kind": "no_match", "query": "Send an SMS verification code during signup", "expected": null},
+  {"kind": "no_match", "query": "The mobile app supports dark mode", "expected": null},
+  {"kind": "no_match", "query": "Audit logs are retained for 7 years", "expected": null},
+  {"kind": "no_match", "query": "Support right-to-left languages such as Arabic", "expected": null}
+]
