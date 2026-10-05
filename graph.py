@@ -21,6 +21,10 @@ from tools import SEARCH_TOOL_SCHEMA, search_test_cases
 
 
 MAX_REASK_ITERATIONS = 2
+# One repair attempt: a bad spec is retried once with the validation errors
+# fed back, then escalated. temperature=0 isn't fully deterministic, but
+# resending an identical prompt is a weak retry; the feedback is the point.
+MAX_SPEC_ATTEMPTS = 2
 
 
 class GraphState(BaseModel):
@@ -36,6 +40,11 @@ class GraphState(BaseModel):
     human_answers: list[str] = Field(default_factory=list)
     reask_count: int = 0
     coverage_match: dict | None = None
+    # Why a run ended in needs_escalation. One status for callers (same
+    # handling either way: a human picks it up), the cause kept as detail.
+    escalation_reason: str | None = None
+    spec_attempts: int = 0
+    spec_errors: list[str] | None = None
 
 
 with open("prompts/testcase_v1.txt", mode="r", encoding="utf-8") as f:
@@ -93,13 +102,41 @@ def generate_test_case(state: GraphState) -> dict:
     # pass — the guard-exhausted case routes to mark_unresolved instead.
     requirement = _fold_in_clarifications(state.requirement, state.human_answers)
 
-    prompt = TESTCASE_PROMPT.format(requirement=requirement)
-    result = call_deepseek_json(prompt)
-    status, detail = validate_response(result.text, TestCase)
+    base_prompt = TESTCASE_PROMPT.format(requirement=requirement)
+    prompt = base_prompt
+    # Errors from every rejected attempt are kept even if a later attempt
+    # succeeds: otherwise a repaired spec looks identical to a clean one and
+    # the first-attempt failure rate (observed ~20% in one live sample, 0%
+    # in another) can't be diagnosed or tracked.
+    errors: list[str] = []
+    for attempt in range(1, MAX_SPEC_ATTEMPTS + 1):
+        result = call_deepseek_json(prompt)
+        status, detail = validate_response(result.text, TestCase)
+        if status == "valid":
+            return {
+                "status": "valid",
+                "test_case": detail.model_dump(),
+                "spec_attempts": attempt,
+                "spec_errors": errors or None,
+            }
 
-    if status != "valid":
-        return {"status": status, "test_case": None}
-    return {"status": status, "test_case": detail.model_dump()}
+        rejected = [str(failure) for failure in detail]
+        errors += rejected
+        rejection = "; ".join(rejected)
+        prompt = (
+            f"{base_prompt}\n\nYour previous response was rejected: {rejection}. "
+            "Return a corrected JSON object that fixes exactly these problems."
+        )
+
+    # Still invalid after the repair attempt. Don't emit a best-effort spec
+    # and don't silently drop the requirement: hand it to a human.
+    return {
+        "status": "needs_escalation",
+        "test_case": None,
+        "escalation_reason": "spec_generation_failed",
+        "spec_attempts": MAX_SPEC_ATTEMPTS,
+        "spec_errors": errors,
+    }
 
 
 def check_coverage(state: GraphState) -> dict:
@@ -155,7 +192,7 @@ def mark_unresolved(state: GraphState) -> dict:
     requirement to a human with more authority than whoever answered so
     far. clarifying_questions and human_answers stay in state so whoever
     picks it up next has the full history, not a blank slate."""
-    return {"status": "needs_escalation"}
+    return {"status": "needs_escalation", "escalation_reason": "unresolved_ambiguity"}
 
 
 def _describe_issues(detail: dict | None) -> str:
@@ -184,7 +221,11 @@ def generate_questions(state: GraphState) -> dict:
     status, detail = validate_response(result.text, ClarifyingQuestions)
 
     if status == "valid" and detail.questions:
-        return {"status": status, "clarifying_questions": detail.questions}
+        # Not "valid": that status means "a spec is ready", and a caller
+        # reading test_case from a paused run would get None. The caller's
+        # action here differs (show these questions, then resume), so it
+        # gets its own status.
+        return {"status": "needs_clarification", "clarifying_questions": detail.questions}
     if status == "valid":
         # Schema-valid but empty — a technically-valid response with zero
         # questions isn't trustworthy for a node whose whole job is asking
@@ -197,7 +238,7 @@ def route_after_questions(state: GraphState) -> str:
     """If question generation itself failed, stop rather than interrupting
     with nothing real to show a human — same fail-safe discipline as
     score_testability forcing 0 on its own invalid output."""
-    return "ask_human" if state.status == "valid" else "end"
+    return "ask_human" if state.status == "needs_clarification" else "end"
 
 
 def ask_human(state: GraphState) -> dict:

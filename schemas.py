@@ -7,17 +7,31 @@ needs it.
 """
 
 import json
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ValidationError
+from pydantic import AfterValidator, BaseModel, Field, ValidationError
+
+
+def _non_blank(value: str) -> str:
+    if not value.strip():
+        raise ValueError("must not be blank")
+    return value.strip()
+
+
+# A schema-valid-but-empty string/list is not a usable spec field (same
+# discipline as the questions: [] check in generate_questions).
+NonBlankStr = Annotated[str, AfterValidator(_non_blank)]
 
 
 class TestCase(BaseModel):
-    title: str
-    description: str
-    preconditions: list[str]
-    test_steps: list[str]
-    expected_result: str
+    title: NonBlankStr
+    description: NonBlankStr
+    # Items must be non-blank but the list itself may be empty, matching
+    # testcase_v1.txt ("can be empty"). Requiring >=1 would push the model
+    # to invent a precondition the requirement never stated.
+    preconditions: list[NonBlankStr]
+    test_steps: Annotated[list[NonBlankStr], Field(min_length=1)]
+    expected_result: NonBlankStr
     priority: Literal["low", "medium", "high"]
 
 
@@ -84,16 +98,28 @@ def validate_response(raw_text: str, model: type[BaseModel]):
         result = model.model_validate(parsed)
     except ValidationError as e:
         errors = e.errors()
-        missing = [err["loc"][0] for err in errors if err["type"] == "missing"]
+
+        def where(err) -> str:
+            # loc is () when the JSON isn't an object at all ([], "x", null)
+            return ".".join(str(part) for part in err["loc"]) or "<root>"
+
+        # Present-but-unusable values (blank string, empty required list)
+        # get their own bucket: the repair prompt should say "empty", not
+        # "wrong type".
+        empty_types = {"value_error", "too_short"}
+        missing = [where(err) for err in errors if err["type"] == "missing"]
+        empty = [(where(err), err["msg"]) for err in errors if err["type"] in empty_types]
         wrong_type = [
-            (err["loc"][0], err["type"], err["msg"])
+            (where(err), err["type"], err["msg"])
             for err in errors
-            if err["type"] != "missing"
+            if err["type"] != "missing" and err["type"] not in empty_types
         ]
 
         failures = []
         if missing:
             failures.append(("missing_field", f"Missing required field(s): {missing}"))
+        if empty:
+            failures.append(("empty_content", empty))
         if wrong_type:
             failures.append(("wrong_type", wrong_type))
         return ("invalid", failures)
