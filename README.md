@@ -101,6 +101,21 @@ OpenAI-compatible SDK, for cost reasons.
   malformed" in the final state (`status` gets overwritten by whichever
   node runs next). Left open, not yet fixed.
 
+- **One status per caller behavior.** What a caller should do decides the
+  status, not what went wrong (the cause goes in a detail field):
+
+  | `status` | Caller does | Fields set |
+  |---|---|---|
+  | `needs_clarification` | show the questions, then resume | `clarifying_questions` |
+  | `valid` | use the spec | `test_case` |
+  | `already_covered` | link to the existing case | `coverage_match` |
+  | `needs_escalation` | route to a human | `escalation_reason` (`unresolved_ambiguity` or `spec_generation_failed`) |
+  | `invalid` / `invalid_json` | a node's own output failed; nothing to show | none |
+
+  A paused run used to report `valid` with no spec, so a caller reading
+  `test_case` got `None`. `tests/test_status_contract.py` pins this table.
+  Keys with no value may be absent from a paused result; read with `.get`.
+
 ## Known limitations / open findings
 
 - **Non-determinism isn't limited to generation.** Running the same
