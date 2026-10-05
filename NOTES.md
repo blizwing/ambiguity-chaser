@@ -1249,3 +1249,107 @@ re-run the eval whenever the corpus or model changes. I (Claude) wrote the
 eval queries, so they share my phrasing habits — Pratham should add some of
 his own. Missing `langgraph-checkpoint-sqlite` was installed into the venv
 (already in requirements.txt).
+
+
+## Week 13 — Schema-validated spec emission (5 Oct 2026) — DRAFT, Pratham to review
+
+**Objective:** a spec only reaches the caller if it passes real validation,
+and a bad one is handled deliberately instead of silently. The roadmap has
+no DONE WHEN for Week 13; this one was proposed by Claude, not set in
+`ROADMAP.md`.
+
+**Week 12 follow-up (done first):** added 22 retrieval queries (21 -> 43):
+harder paraphrases, near-misses, no-match queries in the same domain as an
+existing case, and degenerate input. Paraphrase recall@1 fell 1.00 -> 0.89,
+positives kept at `MIN_SCORE=0.60` were 27/28, and no-match correctly empty
+was 10/15. The score distributions now overlap (lowest paraphrase 0.592,
+highest no-match 0.690), so last week's "narrow gap" is gone. The two
+paraphrases that failed are compound or indirect queries I wrote.
+`MIN_SCORE` was not changed. fastembed and numpy were in `requirements.txt`
+but not installed in the venv.
+
+**Built:**
+- `schemas.py`: `TestCase` rejects blank strings, blank list items and an
+  empty `test_steps`. `preconditions` may still be empty (the prompt says
+  so; requiring one invites the model to invent it). Present-but-empty
+  values get their own `empty_content` failure bucket.
+- First tests in the repo: `tests/` (`test_schemas`, `test_spec_emission`,
+  `test_status_contract`, `test_call_validated`) plus `pytest.ini`.
+  82 tests, model calls scripted.
+- New status `needs_clarification` for a paused run (was `valid` with no
+  spec). README now has a status table.
+- `_call_validated` in `graph.py`: one shared call/validate/repair loop
+  (2 attempts) used by the scorer, question generator and spec generator.
+  What each node does when it gives up stays in the node.
+- Escalation reasons on `needs_escalation`: `unresolved_ambiguity`,
+  `scoring_failed`, `question_generation_failed`, `spec_generation_failed`.
+- `prompts/testcase_v2.txt` and a soft `expected_result` length check.
+
+**Found by measuring, not assumed:**
+- A completely empty spec validated as `valid`.
+- `validate_response` raised `IndexError` on valid JSON that isn't an object
+  (`[]`, `"x"`, `null`), breaking its own "never raises" contract in every
+  node.
+- **Reasoning-token truncation.** `deepseek-flash` reasons before answering;
+  on a borderline requirement the hidden reasoning used the whole 2048-token
+  budget (`reasoning_tokens=2048`) and the visible reply came back empty with
+  `finish_reason=length`. Reproduced 3 of 40 calls on one requirement. A
+  "your output was invalid" retry cannot fix this; the retry has to raise
+  the budget.
+- `testcase_v1.txt` contradicted itself: "note ambiguity inside
+  `expected_result`" vs. "`expected_result` 25 words or fewer, no added
+  explanation". The one 45-word spec followed the first rule.
+- A literal "numbers in the spec that are not in the requirement" check
+  flagged 7/18 specs (10/18 on the v2 prompt), and every flag was benign:
+  derived values (the 101st request from "100 per minute"), unit conversion
+  (one minute -> 60 seconds), labels (`T0`, `T1`, "step 1").
+
+**Decisions:**
+- Reused the `needs_escalation` status with a reason field rather than new
+  statuses (one status per caller behavior). Claude's call, not yet
+  confirmed by Pratham.
+- A scorer whose output never validates now escalates (`scoring_failed`)
+  instead of forcing a score of 0. This reverses the Week 8 fail-safe: the
+  forced 0 asked a human questions about a requirement we had failed to
+  read, and spent one of their re-ask rounds. Claude's call, not yet
+  confirmed by Pratham.
+- Two retry kinds: truncated -> same prompt, doubled `max_tokens` (cap 8192);
+  invalid output -> same prompt plus the errors.
+- Over-long `expected_result` is a soft rule (Pratham's call): one repair
+  attempt, then accept with a `spec_warnings` entry, never escalate. The
+  first usable spec is kept if the repair fails outright.
+- New prompt file `v2` instead of editing `v1` (v1 is a recorded copy of
+  the eval-harness prompt).
+- `check_coverage` left as is: it already falls through safely, and a retry
+  would spend money to save a duplicate check.
+
+**Verified by execution:**
+- Tests catch regressions: 20 of 42 schema tests fail against the old
+  `schemas.py`; the paused-status test fails if the old status returns.
+- Live first-attempt failures: scorer 1/30, question generator 1/20 (both
+  truncation). Spec generator 4/20 in one sample and 0/18 in another; the
+  cause of those first four was not captured.
+- After the fix, 40 runs of the borderline requirement: 3 truncated, all 3
+  recovered at the doubled budget, 0 final failures.
+- v2 prompt, 18 specs: 0 over 25 words, 0 with an ambiguity note in
+  `expected_result`, 1 needed a retry.
+
+**Caveats:** samples are small (18-40 calls). The v1 vs. v2 comparison
+counted ambiguity notes differently (by reading vs. regex). The pause and
+resume path was tested with scripted calls and an in-memory checkpointer,
+not live against `graph_state.db`. `call_attempts` and `call_errors` hold
+whatever the last node needing a repair recorded.
+
+**Open / carry forward:**
+- **Number-grounding (fabrication) check: undecided.** Options are no
+  deterministic check and a later LLM judge with a labeled set (Claude's
+  recommendation), a warning-only field, or a hard gate (rejected on the
+  data above). Nothing built.
+- `MIN_SCORE`: lowering to about 0.55 looks right given the cost asymmetry
+  (a missed duplicate is cheaper than a dropped requirement), but it lets
+  more no-match queries through to the LLM verdict. Pratham's call.
+- Pratham still needs to add some of his own queries to
+  `evals/retrieval_queries.json`; all 43 share Claude's phrasing habits.
+- Not checked: whether the DeepSeek API can limit reasoning effort, which
+  would address the truncation at the source.
+- A repair that is itself truncated at 4096 is possible; not seen.
