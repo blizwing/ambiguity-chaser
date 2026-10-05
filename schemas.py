@@ -35,6 +35,21 @@ class TestCase(BaseModel):
     priority: Literal["low", "medium", "high"]
 
 
+EXPECTED_RESULT_MAX_WORDS = 25  # the testcase prompt's own rule
+
+
+def spec_style_problem(tc: "TestCase") -> str | None:
+    """Soft rule the prompt states but that doesn't make a spec wrong: a
+    long expected_result is worth one repair attempt, never an escalation."""
+    words = len(tc.expected_result.split())
+    if words > EXPECTED_RESULT_MAX_WORDS:
+        return (
+            f"expected_result is {words} words; it must be {EXPECTED_RESULT_MAX_WORDS} or fewer. "
+            "Keep it a single pass/fail condition and put any ambiguity note in description"
+        )
+    return None
+
+
 class TestabilityScore(BaseModel):
     """Facts the model reports about a requirement, not a score — Python
     derives the actual score from these booleans (compute_testability_score),

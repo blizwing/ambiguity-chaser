@@ -15,6 +15,7 @@ from schemas import (
     SearchArgs,
     TESTABILITY_THRESHOLD,
     compute_testability_score,
+    spec_style_problem,
     validate_response,
 )
 from tools import SEARCH_TOOL_SCHEMA, search_test_cases
@@ -52,9 +53,11 @@ class GraphState(BaseModel):
     # repaired result doesn't look identical to a clean one.
     call_attempts: int = 0
     call_errors: list[str] | None = None
+    # Soft rules an accepted spec still breaks (e.g. expected_result too long).
+    spec_warnings: list[str] | None = None
 
 
-with open("prompts/testcase_v1.txt", mode="r", encoding="utf-8") as f:
+with open("prompts/testcase_v2.txt", mode="r", encoding="utf-8") as f:
     TESTCASE_PROMPT = f.read()
 
 with open("prompts/testability_score_v1.txt", mode="r", encoding="utf-8") as f:
@@ -72,21 +75,26 @@ def _fold_in_clarifications(requirement: str, answers: list[str]) -> str:
     return f"{requirement}\n{lines}" if answers else requirement
 
 
-def _call_validated(prompt: str, model: type[BaseModel], check=None):
+def _call_validated(prompt: str, model: type[BaseModel], check=None, soft_check=None):
     """Call the model and validate, with one bounded repair attempt.
 
     Shared mechanic only; what a node does when this gives up differs by
-    node and stays in the node. Returns (detail, errors, attempts): detail
-    is the validated model or None if every attempt failed. errors lists
-    every rejected attempt, kept even on eventual success.
+    node and stays in the node. Returns (detail, errors, attempts, warnings):
+    detail is the validated model or None if every attempt failed; errors
+    lists every rejected attempt, kept even on eventual success; warnings
+    lists soft problems in an accepted result.
 
     Two kinds of failure, two different retries:
       - truncated (finish_reason=length and the output doesn't validate):
         same prompt, bigger max_tokens. Feedback can't fix a spent budget.
       - invalid output: same prompt plus the validation errors.
-    `check(detail)` may return a message to reject a schema-valid but
-    unusable result (e.g. an empty question list)."""
+    `check(detail)` returns a message to reject a schema-valid but unusable
+    result (e.g. an empty question list). `soft_check(detail)` returns a
+    message for a result that is usable but breaks a style rule: it earns a
+    repair attempt, but if the repairs don't fix it (or fail outright) the
+    first usable result is accepted with the message as a warning."""
     errors: list[str] = []
+    fallback = None  # (detail, soft problem): usable, but breaks a soft rule
     max_tokens = MAX_TOKENS
     current = prompt
     for attempt in range(1, MAX_CALL_ATTEMPTS + 1):
@@ -95,9 +103,12 @@ def _call_validated(prompt: str, model: type[BaseModel], check=None):
 
         if status == "valid":
             problem = check(detail) if check else None
-            if problem is None:
-                return detail, errors, attempt
-            rejected = [problem]
+            soft = soft_check(detail) if soft_check and problem is None else None
+            if problem is None and soft is None:
+                return detail, errors, attempt, []
+            if soft is not None and fallback is None:
+                fallback = (detail, soft)
+            rejected = [problem or soft]
         elif result.stop_reason == "length":
             errors.append(f"truncated: finish_reason=length at max_tokens={max_tokens}")
             max_tokens = min(max_tokens * 2, MAX_TOKENS_CAP)
@@ -110,7 +121,10 @@ def _call_validated(prompt: str, model: type[BaseModel], check=None):
             f"{prompt}\n\nYour previous response was rejected: {'; '.join(rejected)}. "
             "Return a corrected JSON object that fixes exactly these problems."
         )
-    return None, errors, MAX_CALL_ATTEMPTS
+
+    if fallback is not None:
+        return fallback[0], errors, MAX_CALL_ATTEMPTS, [fallback[1]]
+    return None, errors, MAX_CALL_ATTEMPTS, []
 
 
 def score_testability(state: GraphState) -> dict:
@@ -119,7 +133,7 @@ def score_testability(state: GraphState) -> dict:
     # doesn't get graded on the original text alone once clarified.
     requirement = _fold_in_clarifications(state.requirement, state.human_answers)
 
-    detail, errors, attempts = _call_validated(SCORE_PROMPT.format(requirement=requirement), TestabilityScore)
+    detail, errors, attempts, _ = _call_validated(SCORE_PROMPT.format(requirement=requirement), TestabilityScore)
 
     if detail is None:
         # The scorer's own output never validated. Not a score of 0: that
@@ -163,7 +177,9 @@ def generate_test_case(state: GraphState) -> dict:
     # pass — the guard-exhausted case routes to mark_unresolved instead.
     requirement = _fold_in_clarifications(state.requirement, state.human_answers)
 
-    detail, errors, attempts = _call_validated(TESTCASE_PROMPT.format(requirement=requirement), TestCase)
+    detail, errors, attempts, warnings = _call_validated(
+        TESTCASE_PROMPT.format(requirement=requirement), TestCase, soft_check=spec_style_problem
+    )
 
     if detail is None:
         # Don't emit a best-effort spec and don't silently drop the
@@ -180,6 +196,7 @@ def generate_test_case(state: GraphState) -> dict:
         "test_case": detail.model_dump(),
         "call_attempts": attempts,
         "call_errors": errors or None,
+        "spec_warnings": warnings or None,
     }
 
 
@@ -265,7 +282,7 @@ def generate_questions(state: GraphState) -> dict:
     # A schema-valid but empty list isn't trustworthy for a node whose whole
     # job is asking something (same grader-integrity discipline as P1's
     # ScoreIntegrityError), so it's rejected and repaired like bad output.
-    detail, errors, attempts = _call_validated(
+    detail, errors, attempts, _ = _call_validated(
         prompt,
         ClarifyingQuestions,
         check=lambda d: None if d.questions else "questions list is empty",

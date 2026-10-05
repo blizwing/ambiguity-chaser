@@ -48,14 +48,14 @@ def scripted(monkeypatch):
 
 def test_clean_first_try(scripted):
     calls = scripted(SCORE_CLEAN)
-    detail, errors, attempts = graph._call_validated("p", TestabilityScore)
+    detail, errors, attempts, _ = graph._call_validated("p", TestabilityScore)
     assert detail is not None and errors == [] and attempts == 1
     assert calls[0]["max_tokens"] == MAX_TOKENS
 
 
 def test_truncation_retries_with_bigger_budget_and_same_prompt(scripted):
     calls = scripted(TRUNCATED, SCORE_CLEAN)
-    detail, errors, attempts = graph._call_validated("p", TestabilityScore)
+    detail, errors, attempts, _ = graph._call_validated("p", TestabilityScore)
 
     assert detail is not None and attempts == 2
     assert calls[1]["max_tokens"] == MAX_TOKENS * 2
@@ -65,7 +65,7 @@ def test_truncation_retries_with_bigger_budget_and_same_prompt(scripted):
 
 def test_invalid_output_retries_with_feedback_and_same_budget(scripted):
     calls = scripted({"has_measurable_condition": "maybe"}, SCORE_CLEAN)
-    detail, errors, _ = graph._call_validated("p", TestabilityScore)
+    detail, errors, _, _ = graph._call_validated("p", TestabilityScore)
 
     assert detail is not None
     assert "rejected" in calls[1]["prompt"]
@@ -82,7 +82,7 @@ def test_budget_is_capped(monkeypatch, scripted):
 
 def test_gives_up_after_bounded_attempts(scripted):
     calls = scripted(*[TRUNCATED] * 10)
-    detail, errors, attempts = graph._call_validated("p", TestabilityScore)
+    detail, errors, attempts, _ = graph._call_validated("p", TestabilityScore)
     assert detail is None
     assert len(calls) == attempts == MAX_CALL_ATTEMPTS
     assert len(errors) == MAX_CALL_ATTEMPTS
@@ -91,13 +91,13 @@ def test_gives_up_after_bounded_attempts(scripted):
 def test_complete_valid_json_is_kept_even_if_finish_reason_is_length(scripted):
     # Output that happens to end exactly at the limit but validates is fine.
     scripted((json.dumps(SCORE_CLEAN), "length"))
-    detail, errors, attempts = graph._call_validated("p", TestabilityScore)
+    detail, errors, attempts, _ = graph._call_validated("p", TestabilityScore)
     assert detail is not None and attempts == 1 and errors == []
 
 
 def test_check_rejects_schema_valid_but_unusable_result(scripted):
     scripted({"questions": [], "reasoning": "x"}, QUESTIONS)
-    detail, errors, attempts = graph._call_validated(
+    detail, errors, attempts, _ = graph._call_validated(
         "p", ClarifyingQuestions, check=lambda d: None if d.questions else "questions list is empty"
     )
     assert detail.questions == ["How fast?"] and attempts == 2
@@ -164,3 +164,76 @@ def test_question_failure_clears_stale_questions_and_escalates(scripted):
     assert out["status"] == "needs_escalation"
     assert out["escalation_reason"] == "question_generation_failed"
     assert out["clarifying_questions"] is None
+
+
+# --- soft rules (a usable result that breaks a style rule) ----------------------
+
+from schemas import TestCase, spec_style_problem  # noqa: E402
+
+SPEC = {
+    "title": "t",
+    "description": "d",
+    "preconditions": [],
+    "test_steps": ["s"],
+    "expected_result": "The page renders within 3 seconds.",
+    "priority": "low",
+}
+LONG_SPEC = {**SPEC, "expected_result": " ".join(["word"] * 40)}
+
+
+def helper(**kw):
+    return graph._call_validated("p", TestCase, soft_check=spec_style_problem, **kw)
+
+
+def test_soft_problem_earns_a_repair_that_fixes_it(scripted):
+    calls = scripted(LONG_SPEC, SPEC)
+    detail, errors, attempts, warnings = helper()
+    assert detail.expected_result == SPEC["expected_result"]
+    assert attempts == 2 and warnings == []
+    assert "40 words" in calls[1]["prompt"]
+
+
+def test_unfixed_soft_problem_is_accepted_with_a_warning_not_escalated(scripted):
+    scripted(LONG_SPEC, LONG_SPEC)
+    detail, _, _, warnings = helper()
+    assert detail is not None
+    assert warnings and "40 words" in warnings[0]
+
+
+def test_usable_first_result_survives_a_failed_repair(scripted):
+    # A long-but-valid spec must not be thrown away because the retry broke.
+    scripted(LONG_SPEC, TRUNCATED)
+    detail, _, _, warnings = helper()
+    assert detail is not None and warnings
+
+
+def test_no_soft_problem_means_no_warnings_and_one_call(scripted):
+    calls = scripted(SPEC)
+    detail, errors, attempts, warnings = helper()
+    assert (attempts, warnings, errors, len(calls)) == (1, [], [], 1)
+
+
+def test_hard_failures_still_escalate_when_there_is_no_usable_candidate(scripted):
+    scripted(TRUNCATED, TRUNCATED)
+    detail, _, _, warnings = helper()
+    assert detail is None and warnings == []
+
+
+def test_spec_node_surfaces_the_warning_in_state(scripted):
+    scripted(LONG_SPEC, LONG_SPEC)
+    out = graph.generate_test_case(GraphState(requirement="x"))
+    assert out["status"] == "valid"
+    assert out["spec_warnings"]
+
+
+def test_style_limit_boundary():
+    at_limit = TestCase.model_validate({**SPEC, "expected_result": " ".join(["w"] * 25)})
+    over = TestCase.model_validate({**SPEC, "expected_result": " ".join(["w"] * 26)})
+    assert spec_style_problem(at_limit) is None
+    assert spec_style_problem(over) is not None
+
+
+def test_prompt_no_longer_tells_the_model_to_put_ambiguity_in_expected_result():
+    # The v1 prompt contradicted its own 25-word rule; keep that fixed.
+    assert 'note the ambiguity inside "expected_result"' not in graph.TESTCASE_PROMPT
+    assert 'ambiguity inside "description"' in graph.TESTCASE_PROMPT
