@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 import graph
-from graph import GraphState, MAX_SPEC_ATTEMPTS
+from graph import GraphState, MAX_CALL_ATTEMPTS
 
 GOOD = {
     "title": "Account lockout",
@@ -63,7 +63,7 @@ def test_valid_first_try_makes_one_call(scripted):
     out = run()
     assert out["status"] == "valid"
     assert out["test_case"]["title"] == "Account lockout"
-    assert out["spec_attempts"] == 1
+    assert out["call_attempts"] == 1
     assert len(prompts) == 1
 
 
@@ -71,7 +71,7 @@ def test_invalid_then_valid_repairs_with_feedback(scripted):
     prompts = scripted(EMPTY_SPEC, GOOD)
     out = run()
     assert out["status"] == "valid"
-    assert out["spec_attempts"] == 2
+    assert out["call_attempts"] == 2
     assert "rejected" in prompts[1] and "title" in prompts[1] and "test_steps" in prompts[1]
     assert "rejected" not in prompts[0]
 
@@ -92,21 +92,21 @@ def test_invalid_twice_escalates_and_emits_no_spec(scripted):
     assert out["status"] == "needs_escalation"
     assert out["escalation_reason"] == "spec_generation_failed"
     assert out["test_case"] is None
-    assert out["spec_attempts"] == MAX_SPEC_ATTEMPTS
-    assert out["spec_errors"]
-    assert len(prompts) == MAX_SPEC_ATTEMPTS  # bounded: never loops
+    assert out["call_attempts"] == MAX_CALL_ATTEMPTS
+    assert out["call_errors"]
+    assert len(prompts) == MAX_CALL_ATTEMPTS  # bounded: never loops
 
 
 def test_repaired_spec_keeps_first_attempt_errors_for_diagnosis(scripted):
     scripted(EMPTY_SPEC, GOOD)
     out = run()
     assert out["status"] == "valid"
-    assert out["spec_errors"] and "title" in out["spec_errors"][0]
+    assert out["call_errors"] and "title" in out["call_errors"][0]
 
 
 def test_clean_first_try_has_no_errors(scripted):
     scripted(GOOD)
-    assert run()["spec_errors"] is None
+    assert run()["call_errors"] is None
 
 
 def test_api_exception_still_propagates(scripted):

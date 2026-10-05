@@ -5,7 +5,8 @@ status, and the fields a caller would read for that status are present.
   valid                spec ready; test_case set
   already_covered      coverage_match set, test_case None
   needs_escalation     test_case None, escalation_reason set
-  invalid / invalid_json  a node's own output failed; test_case None
+                       (unresolved_ambiguity | spec_generation_failed |
+                        scoring_failed | question_generation_failed)
 """
 
 import json
@@ -135,11 +136,12 @@ def test_reask_exhaustion_escalates(app):
 
 
 @pytest.mark.parametrize("bad_questions", [{"questions": [], "reasoning": "x"}, "not json", "[]"])
-def test_failed_question_generation_ends_without_pausing(app, bad_questions):
-    g = app([SCORE_VAGUE], questions=[bad_questions])
+def test_failed_question_generation_escalates_without_pausing(app, bad_questions):
+    g = app([SCORE_VAGUE], questions=[bad_questions] * graph.MAX_CALL_ATTEMPTS)
     result = g.invoke({"requirement": REQ}, config=CONFIG)
 
     assert "__interrupt__" not in result  # nothing real to show a human
-    assert result["status"] in ("invalid", "invalid_json")
+    assert result["status"] == "needs_escalation"
+    assert result["escalation_reason"] == "question_generation_failed"
     assert g.get_state(CONFIG).next == ()
     check_contract(result)

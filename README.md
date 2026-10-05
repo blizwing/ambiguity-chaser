@@ -94,12 +94,20 @@ OpenAI-compatible SDK, for cost reasons.
 - **Threshold is 86, not 85.** Boundary-arithmetic bug found and fixed same
   session: `score >= 85` still let one soft failure through, since one
   soft failure scores exactly 85.
-- **A scorer that fails schema validation forces a 0, not a crash** — a
-  defensible fail-safe (can't confidently score it, don't confidently
-  generate a spec either), though this currently makes "score is
-  genuinely 0" indistinguishable from "the scorer's own output was
-  malformed" in the final state (`status` gets overwritten by whichever
-  node runs next). Left open, not yet fixed.
+- **Scorer, question generator and spec generator share one bounded repair
+  mechanic** (`_call_validated`, 2 attempts), then escalate with a reason.
+  A scorer whose output never validates is `needs_escalation` /
+  `scoring_failed`, not a score of 0: the old forced 0 asked a human
+  clarifying questions about a requirement the scorer simply failed to
+  read, and burned one of their re-ask rounds. `check_coverage` is
+  deliberately left as is (falls through to spec generation).
+- **Reasoning-token truncation.** `deepseek-flash` reasons before it
+  answers, and on a borderline requirement the hidden reasoning can use
+  the whole `max_tokens` budget and return an empty reply
+  (`finish_reason=length`, `reasoning_tokens=2048`; 3 of 40 calls on one
+  requirement). The retry for that doubles the budget (capped at 8192)
+  instead of feeding back an error; live, 3/3 recovered. Invalid output
+  gets the opposite retry: same budget, errors fed back.
 
 - **One status per caller behavior.** What a caller should do decides the
   status, not what went wrong (the cause goes in a detail field):
@@ -109,8 +117,7 @@ OpenAI-compatible SDK, for cost reasons.
   | `needs_clarification` | show the questions, then resume | `clarifying_questions` |
   | `valid` | use the spec | `test_case` |
   | `already_covered` | link to the existing case | `coverage_match` |
-  | `needs_escalation` | route to a human | `escalation_reason` (`unresolved_ambiguity` or `spec_generation_failed`) |
-  | `invalid` / `invalid_json` | a node's own output failed; nothing to show | none |
+  | `needs_escalation` | route to a human | `escalation_reason`: `unresolved_ambiguity`, `scoring_failed`, `question_generation_failed` or `spec_generation_failed` |
 
   A paused run used to report `valid` with no spec, so a caller reading
   `test_case` got `None`. `tests/test_status_contract.py` pins this table.

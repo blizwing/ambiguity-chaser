@@ -6,7 +6,7 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import Command, interrupt
 from pydantic import BaseModel, Field
-from llm_client import call_deepseek_json, call_deepseek_with_tools
+from llm_client import MAX_TOKENS, call_deepseek_json, call_deepseek_with_tools
 from schemas import (
     TestCase,
     TestabilityScore,
@@ -21,10 +21,14 @@ from tools import SEARCH_TOOL_SCHEMA, search_test_cases
 
 
 MAX_REASK_ITERATIONS = 2
-# One repair attempt: a bad spec is retried once with the validation errors
-# fed back, then escalated. temperature=0 isn't fully deterministic, but
-# resending an identical prompt is a weak retry; the feedback is the point.
-MAX_SPEC_ATTEMPTS = 2
+# Total LLM attempts per node (one repair attempt), then escalate.
+MAX_CALL_ATTEMPTS = 2
+# deepseek-flash is a reasoning model: hidden reasoning tokens count against
+# max_tokens, and on a borderline requirement they can use the whole budget
+# and leave the visible reply empty (observed live: reasoning_tokens=2048,
+# content='', finish_reason=length, 3 of 40 calls). A retry for that must
+# raise the budget; feeding back "your output was invalid" can't help.
+MAX_TOKENS_CAP = 8192
 
 
 class GraphState(BaseModel):
@@ -43,8 +47,11 @@ class GraphState(BaseModel):
     # Why a run ended in needs_escalation. One status for callers (same
     # handling either way: a human picks it up), the cause kept as detail.
     escalation_reason: str | None = None
-    spec_attempts: int = 0
-    spec_errors: list[str] | None = None
+    # From the last LLM node that needed more than one attempt. Errors from
+    # rejected attempts are kept even when a later attempt succeeds, so a
+    # repaired result doesn't look identical to a clean one.
+    call_attempts: int = 0
+    call_errors: list[str] | None = None
 
 
 with open("prompts/testcase_v1.txt", mode="r", encoding="utf-8") as f:
@@ -65,25 +72,79 @@ def _fold_in_clarifications(requirement: str, answers: list[str]) -> str:
     return f"{requirement}\n{lines}" if answers else requirement
 
 
+def _call_validated(prompt: str, model: type[BaseModel], check=None):
+    """Call the model and validate, with one bounded repair attempt.
+
+    Shared mechanic only; what a node does when this gives up differs by
+    node and stays in the node. Returns (detail, errors, attempts): detail
+    is the validated model or None if every attempt failed. errors lists
+    every rejected attempt, kept even on eventual success.
+
+    Two kinds of failure, two different retries:
+      - truncated (finish_reason=length and the output doesn't validate):
+        same prompt, bigger max_tokens. Feedback can't fix a spent budget.
+      - invalid output: same prompt plus the validation errors.
+    `check(detail)` may return a message to reject a schema-valid but
+    unusable result (e.g. an empty question list)."""
+    errors: list[str] = []
+    max_tokens = MAX_TOKENS
+    current = prompt
+    for attempt in range(1, MAX_CALL_ATTEMPTS + 1):
+        result = call_deepseek_json(current, max_tokens=max_tokens)
+        status, detail = validate_response(result.text, model)
+
+        if status == "valid":
+            problem = check(detail) if check else None
+            if problem is None:
+                return detail, errors, attempt
+            rejected = [problem]
+        elif result.stop_reason == "length":
+            errors.append(f"truncated: finish_reason=length at max_tokens={max_tokens}")
+            max_tokens = min(max_tokens * 2, MAX_TOKENS_CAP)
+            continue
+        else:
+            rejected = [str(failure) for failure in detail]
+
+        errors += rejected
+        current = (
+            f"{prompt}\n\nYour previous response was rejected: {'; '.join(rejected)}. "
+            "Return a corrected JSON object that fixes exactly these problems."
+        )
+    return None, errors, MAX_CALL_ATTEMPTS
+
+
 def score_testability(state: GraphState) -> dict:
     # Re-ask loop (Week 10): re-score with every clarification gathered so
     # far folded in — a requirement that was ambiguous the first time
     # doesn't get graded on the original text alone once clarified.
     requirement = _fold_in_clarifications(state.requirement, state.human_answers)
 
-    prompt = SCORE_PROMPT.format(requirement=requirement)
-    result = call_deepseek_json(prompt)
-    status, detail = validate_response(result.text, TestabilityScore)
+    detail, errors, attempts = _call_validated(SCORE_PROMPT.format(requirement=requirement), TestabilityScore)
 
-    if status != "valid":
-        # Can't confirm testability if the scorer's own output didn't
-        # validate — treat as untestable rather than crashing the graph.
-        return {"status": status, "testability_score": 0, "testability_detail": None}
+    if detail is None:
+        # The scorer's own output never validated. Not a score of 0: that
+        # would ask a human clarifying questions about a requirement we
+        # simply failed to read, and spend one of their re-ask rounds on it.
+        return {
+            "status": "needs_escalation",
+            "escalation_reason": "scoring_failed",
+            "testability_score": None,
+            "testability_detail": None,
+            "call_attempts": attempts,
+            "call_errors": errors,
+        }
 
-    return {"testability_score": compute_testability_score(detail), "testability_detail": detail.model_dump()}
+    return {
+        "testability_score": compute_testability_score(detail),
+        "testability_detail": detail.model_dump(),
+        "call_attempts": attempts,
+        "call_errors": errors or None,
+    }
 
 
 def route_by_testability(state: GraphState) -> str:
+    if state.escalation_reason == "scoring_failed":
+        return "end"
     if state.testability_score is not None and state.testability_score >= TESTABILITY_THRESHOLD:
         return "check_coverage"
     if state.reask_count >= MAX_REASK_ITERATIONS:
@@ -102,40 +163,23 @@ def generate_test_case(state: GraphState) -> dict:
     # pass — the guard-exhausted case routes to mark_unresolved instead.
     requirement = _fold_in_clarifications(state.requirement, state.human_answers)
 
-    base_prompt = TESTCASE_PROMPT.format(requirement=requirement)
-    prompt = base_prompt
-    # Errors from every rejected attempt are kept even if a later attempt
-    # succeeds: otherwise a repaired spec looks identical to a clean one and
-    # the first-attempt failure rate (observed ~20% in one live sample, 0%
-    # in another) can't be diagnosed or tracked.
-    errors: list[str] = []
-    for attempt in range(1, MAX_SPEC_ATTEMPTS + 1):
-        result = call_deepseek_json(prompt)
-        status, detail = validate_response(result.text, TestCase)
-        if status == "valid":
-            return {
-                "status": "valid",
-                "test_case": detail.model_dump(),
-                "spec_attempts": attempt,
-                "spec_errors": errors or None,
-            }
+    detail, errors, attempts = _call_validated(TESTCASE_PROMPT.format(requirement=requirement), TestCase)
 
-        rejected = [str(failure) for failure in detail]
-        errors += rejected
-        rejection = "; ".join(rejected)
-        prompt = (
-            f"{base_prompt}\n\nYour previous response was rejected: {rejection}. "
-            "Return a corrected JSON object that fixes exactly these problems."
-        )
-
-    # Still invalid after the repair attempt. Don't emit a best-effort spec
-    # and don't silently drop the requirement: hand it to a human.
+    if detail is None:
+        # Don't emit a best-effort spec and don't silently drop the
+        # requirement: hand it to a human.
+        return {
+            "status": "needs_escalation",
+            "test_case": None,
+            "escalation_reason": "spec_generation_failed",
+            "call_attempts": attempts,
+            "call_errors": errors,
+        }
     return {
-        "status": "needs_escalation",
-        "test_case": None,
-        "escalation_reason": "spec_generation_failed",
-        "spec_attempts": MAX_SPEC_ATTEMPTS,
-        "spec_errors": errors,
+        "status": "valid",
+        "test_case": detail.model_dump(),
+        "call_attempts": attempts,
+        "call_errors": errors or None,
     }
 
 
@@ -217,27 +261,42 @@ def generate_questions(state: GraphState) -> dict:
     (SESSION 4 finding: an interrupted node re-runs from its start)."""
     issues = _describe_issues(state.testability_detail)
     prompt = QUESTIONS_PROMPT.format(requirement=state.requirement, issues=issues)
-    result = call_deepseek_json(prompt)
-    status, detail = validate_response(result.text, ClarifyingQuestions)
 
-    if status == "valid" and detail.questions:
-        # Not "valid": that status means "a spec is ready", and a caller
-        # reading test_case from a paused run would get None. The caller's
-        # action here differs (show these questions, then resume), so it
-        # gets its own status.
-        return {"status": "needs_clarification", "clarifying_questions": detail.questions}
-    if status == "valid":
-        # Schema-valid but empty — a technically-valid response with zero
-        # questions isn't trustworthy for a node whose whole job is asking
-        # something (same grader-integrity discipline as P1's ScoreIntegrityError).
-        return {"status": "invalid", "clarifying_questions": None}
-    return {"status": status, "clarifying_questions": None}
+    # A schema-valid but empty list isn't trustworthy for a node whose whole
+    # job is asking something (same grader-integrity discipline as P1's
+    # ScoreIntegrityError), so it's rejected and repaired like bad output.
+    detail, errors, attempts = _call_validated(
+        prompt,
+        ClarifyingQuestions,
+        check=lambda d: None if d.questions else "questions list is empty",
+    )
+
+    if detail is None:
+        # Nothing real to show a human, so don't pause; escalate instead of
+        # ending as an anonymous failure the caller can't act on.
+        return {
+            "status": "needs_escalation",
+            "escalation_reason": "question_generation_failed",
+            "clarifying_questions": None,
+            "call_attempts": attempts,
+            "call_errors": errors,
+        }
+
+    # Not "valid": that status means "a spec is ready", and a caller
+    # reading test_case from a paused run would get None. The caller's
+    # action here differs (show these questions, then resume), so it
+    # gets its own status.
+    return {
+        "status": "needs_clarification",
+        "clarifying_questions": detail.questions,
+        "call_attempts": attempts,
+        "call_errors": errors or None,
+    }
 
 
 def route_after_questions(state: GraphState) -> str:
     """If question generation itself failed, stop rather than interrupting
-    with nothing real to show a human — same fail-safe discipline as
-    score_testability forcing 0 on its own invalid output."""
+    with nothing real to show a human."""
     return "ask_human" if state.status == "needs_clarification" else "end"
 
 
@@ -268,6 +327,7 @@ builder.add_conditional_edges(
         "check_coverage": "check_coverage",
         "generate_questions": "generate_questions",
         "mark_unresolved": "mark_unresolved",
+        "end": END,
     },
 )
 builder.add_conditional_edges(
