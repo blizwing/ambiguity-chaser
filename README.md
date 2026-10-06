@@ -13,13 +13,15 @@ judge/generator can't catch a contradiction between two requirements that
 are each individually unambiguous. Full three-phase context and the
 complete Phase 1 build log live in that repo.
 
-## Status (as of 30 Sep 2026)
+## Status (as of 6 Oct 2026)
 
-Weeks 6–11 of the roadmap are built and working: the scoring gate,
+Weeks 6–13 of the roadmap are built and working: the scoring gate,
 human-in-the-loop pause/persist/resume, the re-ask loop with a
-max-iteration guard, and a tool-calling coverage check. Week 12
-(embeddings + retrieval, replacing the keyword search behind the coverage
-check) is next.
+max-iteration guard, a tool-calling coverage check, embedding-based
+retrieval behind it (Week 12), and schema-validated spec emission with a
+shared repair mechanic and a status contract (Week 13). Week 14 (point the
+Phase 1 eval harness at the agent) is next. The test suite (`tests/`, 83
+tests, model calls scripted) runs with `pytest`.
 
 ## What's built
 
@@ -131,11 +133,22 @@ OpenAI-compatible SDK, for cost reasons.
   judgment feeding the routing decision varies run to run at
   `temperature=0`, not just the generated test case. Not fixed; can only
   be mitigated (e.g. majority-vote-across-N-calls), not eliminated.
-- **Coverage search is keyword-only.** `search_test_cases` matches on word
-  overlap, so a paraphrased requirement with no shared words won't find its
-  existing test case. Week 12 replaces it with embeddings. Only the first
-  tool call is handled (`tool_calls[0]`), and search results are folded into
-  a prompt string rather than sent back as a `role: "tool"` message.
+- **Retrieval cannot fully separate matches from non-matches.**
+  `search_test_cases` now uses local embeddings (`retrieval.py`,
+  `MIN_SCORE = 0.60`). On the 43-query eval set the score ranges overlap
+  (lowest paraphrase 0.592, highest no-match 0.690): paraphrase recall@1
+  is 0.89 and 5 of 15 no-match queries still pass the cutoff, so the LLM
+  verdict after retrieval does the final separating. Lowering `MIN_SCORE`
+  was considered and rejected: it trades a cheap error (a redundant spec)
+  for the expensive one (a real requirement silently dropped as "already
+  covered"). The corpus is 10 cases and every eval query was written by
+  Claude. Only the first tool call is handled (`tool_calls[0]`), and search
+  results are folded into a prompt string rather than sent back as a
+  `role: "tool"` message.
+- **No check that spec values are grounded in the requirement.** A literal
+  "number not in the requirement" check flagged 7/18 specs, all benign, so
+  it was not built. Planned: an LLM judge measured against hand-labeled
+  specs, feeding a warning-only field (see `BACKLOG.md`).
 - **`thread_id` collisions.** The id is a hash of the requirement text, so
   two identical requirement strings submitted as separate runs share one
   thread. Accepted tradeoff.
@@ -175,8 +188,16 @@ lives only in `NOTES.md`, keyed by date, never encoded into a filename
 - `schemas.py` — Pydantic models + scoring/validation logic.
 - `llm_client.py` — DeepSeek API wrapper (JSON-mode and tool-calling).
 - `tools.py` — `search_test_cases` and its tool schema.
+- `retrieval.py` — local embedding search over the corpus.
 - `test_corpus.json` — invented existing test cases the coverage check
   searches.
+- `tests/` — pytest suite (schemas, spec emission, status contract, shared
+  call/repair helper); model calls are scripted.
+- `evals/` — labeled retrieval queries and the script that reports recall
+  and score distributions.
+- `docs/` — dummy-project source documents for writing test requirements
+  (e.g. a guest-checkout change request).
+- `BACKLOG.md` — deferred ideas, with the condition for revisiting each.
 - `prompts/` — prompt text files, versioned by filename suffix (`_v1`).
 - `scratch/` — throwaway hands-on exercises, not part of the graph.
 - `experiments/` — full standalone write-ups for research spikes (see

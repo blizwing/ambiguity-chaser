@@ -1275,7 +1275,7 @@ but not installed in the venv.
   values get their own `empty_content` failure bucket.
 - First tests in the repo: `tests/` (`test_schemas`, `test_spec_emission`,
   `test_status_contract`, `test_call_validated`) plus `pytest.ini`.
-  82 tests, model calls scripted.
+  82 tests, model calls scripted (83 after the 6 Oct addition below).
 - New status `needs_clarification` for a paused run (was `valid` with no
   spec). README now has a status table.
 - `_call_validated` in `graph.py`: one shared call/validate/repair loop
@@ -1353,3 +1353,54 @@ whatever the last node needing a repair recorded.
 - Not checked: whether the DeepSeek API can limit reasoning effort, which
   would address the truncation at the source.
 - A repair that is itself truncated at 4096 is possible; not seen.
+
+
+## Week 14 — Point the Phase 1 harness at the agent (6 Oct 2026) — DRAFT, Pratham to review
+
+**Objective (proposed, not yet agreed):** score the agent's output with the
+`eval-harness` judge and metrics, using pass rates across repeated runs, not
+exact-match diffs. `ROADMAP.md` has only a title for Week 14, so the DONE
+WHEN is Claude's proposal: one harness run against the agent producing a
+recorded pass rate, repeated across several runs, with the run committed.
+Split day: Pratham decides what to measure (which requirements should ask
+vs. emit, the accepted pass threshold); Claude scaffolds the adapter.
+Nothing of the harness work was started today.
+
+**Done today (housekeeping from Week 13 open items):**
+- Confirmed by Pratham: `needs_escalation` with a reason field (no new
+  statuses), and `scoring_failed` escalating instead of forcing a score of 0.
+- Added `test_scorer_failure_on_the_rescore_after_resume_escalates_and_keeps_the_answer`
+  to `tests/test_status_contract.py`: first score vague, human answers, the
+  re-score never validates. Asserts escalation with `scoring_failed`, the
+  answer kept, `reask_count` still 1, no spec. Closes the gap that the
+  failure had only been tested on the first scoring pass. 83 passed.
+  The test was not checked by deliberately breaking the code.
+- `docs/change_request_guest_checkout.md`: a dummy-project change request
+  (guest checkout) written as SA/BA source material for Pratham's
+  requirement writing. All numbers invented. Section 14 holds five deliberate
+  gaps; section 16 suggests vague and contradicting requirements to try.
+- `BACKLOG.md`: number-grounding judge parked with its plan.
+- `README.md` brought up to date (status, retrieval limitation, layout).
+
+**Decisions:**
+- **`MIN_SCORE` stays 0.60.** Claude's Week 13 recommendation to lower it to
+  about 0.55 is withdrawn. With the 43-query set the score ranges overlap
+  (lowest paraphrase 0.592, highest no-match 0.690) and 5/15 no-match
+  queries already pass at 0.60. Lowering it would win back one paraphrase
+  (27/28 to 28/28) but pass more unrelated cases to the LLM verdict, where a
+  wrong "already covered" silently drops a real requirement; a missed
+  duplicate only costs a redundant spec. The earlier "cost asymmetry"
+  argument pointed the wrong way. Pratham accepted.
+- **Number-grounding check: combine the options, but not today.** Order:
+  hand-label about 20 specs (Pratham), build an LLM judge and measure it
+  against them, then feed its verdict into `spec_warnings` as warning-only.
+  The judge decides, so the warning is rare enough to be read. Pratham
+  starts the labeling tomorrow.
+
+**Open / carry forward:**
+- Week 14 objective and DONE WHEN need Pratham's agreement; first check
+  how `eval-harness` takes input to size the adapter work.
+- Pratham still needs to add his own retrieval queries (his wording, with
+  the expected TC id or `null`) to `evals/retrieval_queries.json`; not yet
+  received.
+- The pause/resume path is still untested live against `graph_state.db`.
