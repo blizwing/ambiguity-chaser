@@ -1404,3 +1404,57 @@ Nothing of the harness work was started today.
   the expected TC id or `null`) to `evals/retrieval_queries.json`; not yet
   received.
 - The pause/resume path is still untested live against `graph_state.db`.
+
+---
+
+## Aside — Stress run on a random requirement set (6 Oct 2026) — DRAFT, Pratham to review
+
+**What was run:** a set of eight requirements, all split out of one
+multi-behaviour feature spec, each passed through the graph on its own (one
+`start_run` per requirement). The aim was to see how the scorer and spec
+generator behave on requirements that are individually readable but belong
+together.
+
+**Result:** all eight scored 100, all eight came back `valid` with no spec
+warnings, and none paused to ask a question.
+
+**What we found:**
+- **A per-requirement score cannot see contradictions between requirements.**
+  The source spec contradicted itself in two places: one example showed an
+  outcome its own rule said could not happen, and one clearance condition
+  referred to a state the spec elsewhere excluded from evaluation at all.
+  Each piece, read alone, is clear, so each scored 100. This is the same gap
+  P1 parked (the `req_25`/`req_34` contradiction), now seen on a second set.
+- **A score of 100 means "readable", not "consistent".** Nothing the agent
+  reports says whether the requirements fit together. Reading 100 as "safe to
+  test" would be wrong.
+- **Splitting the spec was itself a judgment call, and it hid the problem.**
+  One-test-per-requirement needs atomic inputs, but atomising is exactly what
+  removes the context in which the contradictions are visible. Any set-level
+  check has to run on the pieces together, not just on each piece.
+- **One test case per requirement is too coarse for branching requirements.**
+  Requirements with several statuses or several clearance paths got a single
+  happy-path case: only one of three accepted statuses, only one of several
+  clearance routes, and nothing for the "does not apply to X" exclusions or
+  the window boundary.
+- **Concrete requirements with worked examples produced good cases.** Where
+  the requirement carried a specific example, the case mirrored it closely.
+  The ambiguity notes the `testcase_v2` prompt puts in `description` were the
+  only place doubt showed up; the score did not carry it.
+- **One spec contradicted another and the case followed the wrong one.** The
+  case for the requirement containing the contradicting example silently
+  adopted the example's version of the rule, with no flag.
+- **Minor:** one description had a typo; a few dashes rendered as `?`
+  (probably console encoding, not confirmed).
+
+**Decision to make (Pratham's call):**
+- **Set-level contradiction check** (the Phase 2 goal) versus **per-branch
+  test cases** (one case per status/clearance path). Claude's recommendation
+  is the set-level check first, since it targets what P2 exists to prove;
+  per-branch generation is plumbing that can wait.
+
+**Open / carry forward:**
+- Whether a requirement set should be scored as a whole in addition to
+  per-requirement, and what the graph's input unit becomes if so.
+- Not yet tried: feeding the whole spec in as one requirement, to see whether
+  the scorer catches the contradictions when the pieces are not split.
