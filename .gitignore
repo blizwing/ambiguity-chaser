@@ -13,3 +13,7 @@ __pycache__/
 
 # Local checkpoint DBs (runtime state, not source)
 *.db
+
+# Local data, run outputs, logs.
+# Never commit: repo is public. See CLAUDE.md "No PII or secrets in git".
+private/
