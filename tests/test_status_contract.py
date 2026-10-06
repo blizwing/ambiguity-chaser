@@ -135,6 +135,21 @@ def test_reask_exhaustion_escalates(app):
     check_contract(result)
 
 
+def test_scorer_failure_on_the_rescore_after_resume_escalates_and_keeps_the_answer(app):
+    # First score is fine and pauses; the re-score after the human answers
+    # never validates. Must escalate, not ask a second round, not emit a spec.
+    g = app([SCORE_VAGUE] + ["not json"] * graph.MAX_CALL_ATTEMPTS)
+    g.invoke({"requirement": REQ}, config=CONFIG)
+    result = g.invoke(Command(resume="Under 3 seconds"), config=CONFIG)
+
+    assert "__interrupt__" not in result
+    assert result["status"] == "needs_escalation"
+    assert result["escalation_reason"] == "scoring_failed"
+    assert result["human_answers"] == ["Under 3 seconds"]  # the human's work isn't lost
+    assert result["reask_count"] == 1  # the round that was already spent, no new one
+    check_contract(result)
+
+
 @pytest.mark.parametrize("bad_questions", [{"questions": [], "reasoning": "x"}, "not json", "[]"])
 def test_failed_question_generation_escalates_without_pausing(app, bad_questions):
     g = app([SCORE_VAGUE], questions=[bad_questions] * graph.MAX_CALL_ATTEMPTS)
