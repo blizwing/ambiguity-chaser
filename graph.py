@@ -56,6 +56,11 @@ class GraphState(BaseModel):
     call_errors: list[str] | None = None
     # Soft rules an accepted spec still breaks (e.g. expected_result too long).
     spec_warnings: list[str] | None = None
+    # Set-level consistency (consistency.py), kept apart from the testability
+    # score: a clean score says "readable", this says whether the requirement
+    # was checked against the rest of its set. not_checked for a lone run.
+    consistency: str = "not_checked"  # checked | conflict | not_checked
+    consistency_conflicts: list[dict] | None = None
 
 
 with open("prompts/testcase_v2.txt", mode="r", encoding="utf-8") as f:
@@ -155,6 +160,26 @@ def score_testability(state: GraphState) -> dict:
         "call_attempts": attempts,
         "call_errors": errors or None,
     }
+
+
+def raise_conflict(state: GraphState) -> dict:
+    """Pause on a grounded cross-requirement conflict, through the same
+    interrupt path as clarifying questions: the human's answer is folded in
+    as a clarification and the run re-scores. Costs one re-ask round."""
+    questions = []
+    for c in state.consistency_conflicts or []:
+        quoted = " vs ".join(f'"{q}"' for q in c["quotes"])
+        questions.append(
+            f"{' vs '.join(c['req_ids'])} conflict: {quoted}. "
+            f"They cannot both hold when: {c['shared_situation']}. Which applies?"
+        )
+    return {"status": "needs_clarification", "clarifying_questions": questions}
+
+
+def route_from_start(state: GraphState) -> str:
+    if state.consistency == "conflict" and state.consistency_conflicts and not state.human_answers:
+        return "raise_conflict"
+    return "score_testability"
 
 
 def route_by_testability(state: GraphState) -> str:
@@ -337,7 +362,13 @@ builder.add_node("generate_questions", generate_questions)
 builder.add_node("ask_human", ask_human)
 builder.add_node("mark_unresolved", mark_unresolved)
 
-builder.add_edge(START, "score_testability")
+builder.add_node("raise_conflict", raise_conflict)
+builder.add_conditional_edges(
+    START,
+    route_from_start,
+    {"raise_conflict": "raise_conflict", "score_testability": "score_testability"},
+)
+builder.add_edge("raise_conflict", "ask_human")
 builder.add_conditional_edges(
     "score_testability",
     route_by_testability,
@@ -389,10 +420,13 @@ def _config_for(requirement: str) -> dict:
     return {"configurable": {"thread_id": thread_id}}
 
 
-def start_run(requirement: str):
+def start_run(requirement: str, consistency: str = "not_checked", conflicts: list[dict] | None = None):
+    """consistency/conflicts come from consistency.check_consistency (via
+    ConsistencyResult.status_for / conflicts_for); a lone run is not_checked."""
     with SqliteSaver.from_conn_string(DB_PATH) as checkpointer:
         graph = builder.compile(checkpointer=checkpointer)
-        return graph.invoke({"requirement": requirement}, config=_config_for(requirement))
+        state = {"requirement": requirement, "consistency": consistency, "consistency_conflicts": conflicts}
+        return graph.invoke(state, config=_config_for(requirement))
 
 
 def peek(requirement: str):

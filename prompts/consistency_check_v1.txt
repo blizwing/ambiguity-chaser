@@ -1,0 +1,23 @@
+You are a QA analyst checking a SET of software requirements for contradictions between them. Each requirement may be fine on its own; you are looking only for conflicts ACROSS requirements.
+
+Requirements:
+{requirements}
+######
+Two requirements CONFLICT only if there is one concrete situation in which satisfying one requirement means violating the other. For example, "sessions expire after 15 minutes of inactivity" and "sessions never expire while the cart has items" cannot both hold for an idle session with items in the cart.
+
+These are NOT conflicts. Do not report them:
+- A stricter or more specific rule, or an exception that narrows a general rule (the two can both be satisfied by applying the exception where it applies).
+- A gap: one requirement is silent about something another requirement covers.
+- Requirements about different users, states, or scopes.
+- Two requirements that merely mention the same topic or use similar words.
+
+For each conflict report:
+- "req_ids": the ids of the conflicting requirements (at least two).
+- "quotes": for each id in the same order, an exact, word-for-word excerpt copied from that requirement. Never paraphrase and never shorten with an ellipsis; an excerpt that is not an exact copy invalidates the conflict.
+- "shared_situation": the one situation in which both cannot hold.
+- "explanation": one sentence.
+
+If you are not sure two requirements conflict, do not report them. An empty list is the correct answer for a consistent set. Do not invent details the requirements do not state.
+
+Output ONLY a single JSON object. No prose, no markdown code fences, no explanation before or after:
+{{"conflicts": [{{"req_ids": ["<id>", "<id>"], "quotes": ["<exact excerpt>", "<exact excerpt>"], "shared_situation": "<situation>", "explanation": "<one sentence>"}}], "reasoning": "<one sentence>"}}

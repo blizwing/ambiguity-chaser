@@ -65,6 +65,60 @@ class ClarifyingQuestions(BaseModel):
     questions: list[str]
     reasoning: str
 
+class Conflict(BaseModel):
+    """One claimed contradiction between requirements. req_ids[i] pairs with
+    quotes[i]. Only trusted after ground_conflicts() has checked the quotes."""
+    req_ids: Annotated[list[NonBlankStr], Field(min_length=2)]
+    quotes: Annotated[list[NonBlankStr], Field(min_length=2)]
+    shared_situation: NonBlankStr  # the one situation where both cannot hold
+    explanation: NonBlankStr
+
+
+class ConsistencyReport(BaseModel):
+    conflicts: list[Conflict]
+    reasoning: NonBlankStr
+
+
+def _squash(text: str) -> str:
+    return " ".join(text.split())
+
+
+def ground_conflicts(
+    report: ConsistencyReport, requirements: dict[str, str]
+) -> tuple[list[Conflict], list[tuple[Conflict, str]]]:
+    """Code-side integrity check on the model's own claim (same discipline as
+    ScoreIntegrityError): a conflict counts only if its ids are distinct real
+    requirement ids and every quote appears verbatim (whitespace-normalised)
+    in the requirement it is attributed to. Returns (grounded, dropped) where
+    dropped carries the reason, so a rejected claim stays visible as a warning."""
+    texts = {rid: _squash(text) for rid, text in requirements.items()}
+    grounded: list[Conflict] = []
+    dropped: list[tuple[Conflict, str]] = []
+    for c in report.conflicts:
+        if len(c.req_ids) != len(c.quotes):
+            dropped.append((c, "req_ids and quotes differ in length"))
+        elif len(set(c.req_ids)) != len(c.req_ids):
+            dropped.append((c, "a requirement id is repeated"))
+        elif unknown := [rid for rid in c.req_ids if rid not in texts]:
+            dropped.append((c, f"unknown requirement id(s): {unknown}"))
+        elif bad := [rid for rid, q in zip(c.req_ids, c.quotes) if _squash(q) not in texts[rid]]:
+            dropped.append((c, f"quote not found verbatim in: {bad}"))
+        else:
+            grounded.append(c)
+    return grounded, dropped
+
+
+class Branch(BaseModel):
+    name: NonBlankStr
+    condition: NonBlankStr  # the situation this branch covers, from the requirement
+    expected_stated: bool   # does the requirement state what should happen here?
+
+
+class Branches(BaseModel):
+    branches: Annotated[list[Branch], Field(min_length=1)]
+    reasoning: NonBlankStr
+
+
 class SearchArgs(BaseModel):
     query: str
 

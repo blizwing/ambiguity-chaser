@@ -1,0 +1,16 @@
+You are a QA analyst. List the distinct branches of behaviour in the software requirement below, so that each can get its own test case.
+
+Requirement:
+`{requirement}`
+######
+A branch is one distinct input, status, or path that the requirement says should produce its own outcome (for example each accepted status, each way a state is cleared, each exclusion). Do not list the same branch twice, do not split one path into trivial variants, and list at most {max_branches} branches (merge the least important if there are more).
+
+For each branch give:
+- "name": a short label.
+- "condition": the situation it covers, using the requirement's own terms.
+- "expected_stated": true only if the requirement states what should happen in that situation; false if you would have to guess the outcome.
+
+Do not invent branches or outcomes the requirement does not state.
+
+Output ONLY a single JSON object. No prose, no markdown code fences, no explanation before or after:
+{{"branches": [{{"name": "<label>", "condition": "<situation>", "expected_stated": true}}], "reasoning": "<one sentence>"}}
