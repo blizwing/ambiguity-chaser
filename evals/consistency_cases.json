@@ -1,0 +1,115 @@
+[
+  {
+    "id": "P1_session_expiry",
+    "kind": "planted",
+    "expected_conflict": ["R1", "R2"],
+    "requirements": {
+      "R1": "Guest checkout sessions expire after 15 minutes of inactivity.",
+      "R2": "A guest checkout session must never expire while the cart contains items.",
+      "R3": "The checkout page shows the order total including tax before payment."
+    }
+  },
+  {
+    "id": "P2_order_limit",
+    "kind": "planted",
+    "expected_conflict": ["R1", "R3"],
+    "requirements": {
+      "R1": "A guest may place at most 3 orders per email address in any 30-day period.",
+      "R2": "Each guest order receives a unique order number at confirmation.",
+      "R3": "Guests may place any number of orders; no per-email order limit applies to guest checkout."
+    }
+  },
+  {
+    "id": "P3_verification",
+    "kind": "planted",
+    "expected_conflict": ["R1", "R2"],
+    "requirements": {
+      "R1": "Guest orders above 500.00 require an additional payment verification step.",
+      "R2": "Every guest order, whatever its value, completes after a single payment step with no further verification.",
+      "R3": "Payment is taken by card only."
+    }
+  },
+  {
+    "id": "P4_retention",
+    "kind": "planted",
+    "expected_conflict": ["R2", "R3"],
+    "requirements": {
+      "R1": "A guest can request deletion of their data by contacting support.",
+      "R2": "Guest personal data, including name and email, is deleted 24 months after the guest's last order.",
+      "R3": "Guest order records, including name and email, are retained for 7 years for audit purposes."
+    }
+  },
+  {
+    "id": "P5_confirmation_timing",
+    "kind": "planted",
+    "expected_conflict": ["R1", "R3"],
+    "requirements": {
+      "R1": "A confirmation email is sent within 5 minutes of successful payment.",
+      "R2": "The confirmation email shows the order number and the delivery address.",
+      "R3": "Confirmation emails are sent once a day at 02:00 as a single batch."
+    }
+  },
+  {
+    "id": "N1_exception_not_conflict",
+    "kind": "near_miss",
+    "expected_conflict": null,
+    "note": "R2 is an exception that narrows R1; both can be satisfied.",
+    "requirements": {
+      "R1": "A guest may place at most 3 orders per email address in any 30-day period.",
+      "R2": "A shopper whose email matches a registered account is asked to log in and is not subject to the guest order limit.",
+      "R3": "Each guest order receives a unique order number at confirmation."
+    }
+  },
+  {
+    "id": "N2_gap_not_conflict",
+    "kind": "near_miss",
+    "expected_conflict": null,
+    "note": "R2 covers a case R1 is silent on; nothing contradicts.",
+    "requirements": {
+      "R1": "A confirmation email is sent within 5 minutes of successful payment.",
+      "R2": "If the confirmation email bounces, the order remains valid and is not cancelled.",
+      "R3": "The confirmation email shows the order number."
+    }
+  },
+  {
+    "id": "N3_different_scope_not_conflict",
+    "kind": "near_miss",
+    "expected_conflict": null,
+    "note": "Different user types; both timeouts can hold at once.",
+    "requirements": {
+      "R1": "Sessions of registered users expire after 30 minutes of inactivity.",
+      "R2": "Guest checkout sessions expire after 15 minutes of inactivity.",
+      "R3": "An expired session returns the user to the start of checkout."
+    }
+  },
+  {
+    "id": "C1_tracking",
+    "kind": "clean",
+    "expected_conflict": null,
+    "requirements": {
+      "R1": "A guest can track an order by following the link in the confirmation email.",
+      "R2": "A guest can track an order by entering the order number and the email used at checkout.",
+      "R3": "The tracking page shows the current order status and the expected delivery date."
+    }
+  },
+  {
+    "id": "C2_tax",
+    "kind": "clean",
+    "expected_conflict": null,
+    "requirements": {
+      "R1": "Tax is calculated on the delivery address.",
+      "R2": "The cart total shown at payment equals the amount charged to the card.",
+      "R3": "Guest and registered orders show the same totals for the same cart."
+    }
+  },
+  {
+    "id": "C3_marketing",
+    "kind": "clean",
+    "expected_conflict": null,
+    "requirements": {
+      "R1": "The guest details form has an optional, unticked marketing consent checkbox.",
+      "R2": "Marketing email is sent to a guest only if they ticked the consent checkbox.",
+      "R3": "Guests have no settings page, so consent is captured at checkout only."
+    }
+  }
+]
