@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 import sys
 
 from langgraph.checkpoint.sqlite import SqliteSaver
@@ -371,7 +372,15 @@ def thread_id_for(requirement: str) -> str:
     return hashlib.sha256(requirement.encode()).hexdigest()[:16]
 
 
-DB_PATH = "graph_state.db"
+# Checkpoint DB lives outside the repo folder (which sits in OneDrive) so
+# paused-run state, which holds requirement text, is not synced anywhere.
+# Override with AMBIGUITY_CHASER_DB.
+DB_PATH = os.getenv("AMBIGUITY_CHASER_DB") or os.path.join(
+    os.getenv("LOCALAPPDATA", os.path.expanduser("~")),
+    "ambiguity-chaser",
+    "graph_state.db",
+)
+os.makedirs(os.path.dirname(os.path.abspath(DB_PATH)), exist_ok=True)
 
 
 def _config_for(requirement: str) -> dict:

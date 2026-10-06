@@ -19,7 +19,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
-MODEL = "deepseek-flash"
+# Explicit default, never inherited from a provider default. Override with
+# LLM_MODEL (e.g. a local Ollama model name).
+MODEL = os.getenv("LLM_MODEL") or "deepseek-flash"
 # 1024 (eval-harness's original default, sized for a haiku) truncated a
 # real TestCase response mid-field during Week 7 testing here — bumped to
 # give a multi-field JSON object with a written-out ambiguity explanation
@@ -28,8 +30,12 @@ MAX_TOKENS = 2048
 
 OPENAI_BASE_URL = os.getenv("DEEPSEEK_OPENAI_BASE_URL", "https://api.deepseek.com")
 
+# The key is only mandatory for DeepSeek itself. An OpenAI-compatible local
+# server (e.g. Ollama) ignores the key but the SDK still needs a non-empty one.
 if not DEEPSEEK_API_KEY:
-    raise RuntimeError("DEEPSEEK_API_KEY not set — check your .env")
+    if "deepseek.com" in OPENAI_BASE_URL:
+        raise RuntimeError("DEEPSEEK_API_KEY not set — check your .env")
+    DEEPSEEK_API_KEY = "not-needed-for-local-server"
 
 client = openai.OpenAI(api_key=DEEPSEEK_API_KEY, base_url=OPENAI_BASE_URL)
 
