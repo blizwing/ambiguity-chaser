@@ -2,7 +2,10 @@
   {
     "id": "P1_session_expiry",
     "kind": "planted",
-    "expected_conflict": ["R1", "R2"],
+    "expected_conflict": [
+      "R1",
+      "R2"
+    ],
     "requirements": {
       "R1": "Guest checkout sessions expire after 15 minutes of inactivity.",
       "R2": "A guest checkout session must never expire while the cart contains items.",
@@ -12,7 +15,10 @@
   {
     "id": "P2_order_limit",
     "kind": "planted",
-    "expected_conflict": ["R1", "R3"],
+    "expected_conflict": [
+      "R1",
+      "R3"
+    ],
     "requirements": {
       "R1": "A guest may place at most 3 orders per email address in any 30-day period.",
       "R2": "Each guest order receives a unique order number at confirmation.",
@@ -22,7 +28,10 @@
   {
     "id": "P3_verification",
     "kind": "planted",
-    "expected_conflict": ["R1", "R2"],
+    "expected_conflict": [
+      "R1",
+      "R2"
+    ],
     "requirements": {
       "R1": "Guest orders above 500.00 require an additional payment verification step.",
       "R2": "Every guest order, whatever its value, completes after a single payment step with no further verification.",
@@ -32,7 +41,10 @@
   {
     "id": "P4_retention",
     "kind": "planted",
-    "expected_conflict": ["R2", "R3"],
+    "expected_conflict": [
+      "R2",
+      "R3"
+    ],
     "requirements": {
       "R1": "A guest can request deletion of their data by contacting support.",
       "R2": "Guest personal data, including name and email, is deleted 24 months after the guest's last order.",
@@ -42,7 +54,10 @@
   {
     "id": "P5_confirmation_timing",
     "kind": "planted",
-    "expected_conflict": ["R1", "R3"],
+    "expected_conflict": [
+      "R1",
+      "R3"
+    ],
     "requirements": {
       "R1": "A confirmation email is sent within 5 minutes of successful payment.",
       "R2": "The confirmation email shows the order number and the delivery address.",
@@ -99,7 +114,7 @@
     "requirements": {
       "R1": "Tax is calculated on the delivery address.",
       "R2": "The cart total shown at payment equals the amount charged to the card.",
-      "R3": "Guest and registered orders show the same totals for the same cart."
+      "R3": "Guest and registered orders with the same cart and the same delivery address show the same totals."
     }
   },
   {
@@ -110,6 +125,130 @@
       "R1": "The guest details form has an optional, unticked marketing consent checkbox.",
       "R2": "Marketing email is sent to a guest only if they ticked the consent checkbox.",
       "R3": "Guests have no settings page, so consent is captured at checkout only."
+    }
+  },
+  {
+    "id": "H1_example_outside_rule",
+    "kind": "planted",
+    "expected_conflict": [
+      "R1",
+      "R4"
+    ],
+    "note": "An example in one requirement uses a state the rule in another requirement excludes.",
+    "requirements": {
+      "R1": "A refund is issued only for orders whose status is 'Delivered'.",
+      "R2": "Refunds are paid back to the original payment method within 5 working days.",
+      "R3": "A customer can request a refund from the order history page.",
+      "R4": "Example: a customer cancels an order that is still 'Shipped'; the refund is issued the same day."
+    }
+  },
+  {
+    "id": "H2_clearance_on_excluded_state",
+    "kind": "near_miss",
+    "expected_conflict": null,
+    "note": "Clearing on a state the rule excludes is coherent: excluded orders carry no reminder.",
+    "requirements": {
+      "R1": "A payment reminder is raised on orders in status 'Pending' or 'Invoiced' once the due date has passed. Orders in status 'Draft' are excluded.",
+      "R2": "A payment reminder is cleared when the order status changes to 'Paid', 'Cancelled' or 'Draft'.",
+      "R3": "Reminders are evaluated every night at 01:00."
+    }
+  },
+  {
+    "id": "H3_precedence_vs_example",
+    "kind": "planted",
+    "expected_conflict": [
+      "R3",
+      "R4"
+    ],
+    "note": "R4's example breaks both R3 (only Overdue shown) and R1 (Overdue needs 'In Progress'); either pair counts.",
+    "requirements": {
+      "R1": "A task is flagged 'Overdue' when its status is 'In Progress' and the current time is after its planned end.",
+      "R2": "A task is flagged 'Late' when its status is 'Assigned' and the current time is after its planned start.",
+      "R3": "If both conditions are true for a task, only 'Overdue' is shown.",
+      "R4": "Example: a task planned 13:00-14:00 is still 'Assigned' at 14:10; the dashboard shows both 'Late' and 'Overdue' for it."
+    },
+    "also_accept": [
+      [
+        "R1",
+        "R4"
+      ]
+    ]
+  },
+  {
+    "id": "H4_derived_numeric",
+    "kind": "planted",
+    "expected_conflict": [
+      "R1",
+      "R3"
+    ],
+    "requirements": {
+      "R1": "Returns are accepted within 14 days of delivery.",
+      "R2": "Items marked 'final sale' are excluded from returns.",
+      "R3": "A return is accepted for any non-final-sale item up to 20 days after delivery."
+    }
+  },
+  {
+    "id": "H5_cadence_vs_latency",
+    "kind": "planted",
+    "expected_conflict": [
+      "R1",
+      "R2"
+    ],
+    "note": "No shared words; the conflict follows from arithmetic.",
+    "requirements": {
+      "R1": "Stock levels are evaluated by a batch job that runs every 15 minutes.",
+      "R2": "A low-stock alert is raised within 2 minutes of the stock level dropping below the threshold.",
+      "R3": "The threshold is set per product by the warehouse manager."
+    }
+  },
+  {
+    "id": "H6_three_way",
+    "kind": "planted",
+    "expected_conflict": [
+      "R1",
+      "R2",
+      "R3"
+    ],
+    "also_accept": [
+      [
+        "R1",
+        "R3"
+      ],
+      [
+        "R2",
+        "R3"
+      ],
+      [
+        "R1",
+        "R2"
+      ]
+    ],
+    "note": "No pair clashes alone; together an auto-applied discount plus a code breaks the no-stacking rule.",
+    "requirements": {
+      "R1": "Discounts cannot be combined on a single order.",
+      "R2": "A loyalty discount of 5% is applied automatically to every order from a loyalty member.",
+      "R3": "A loyalty member may enter promotion code SAVE10 on any order, to take 10% off."
+    }
+  },
+  {
+    "id": "H7_exception_with_scope",
+    "kind": "near_miss",
+    "expected_conflict": null,
+    "requirements": {
+      "R1": "User passwords expire after 90 days.",
+      "R2": "Passwords of service accounts do not expire; they are rotated by the key-management job every 180 days.",
+      "R3": "A user is prompted to change an expired password at next login."
+    }
+  },
+  {
+    "id": "H8_consistent_example",
+    "kind": "near_miss",
+    "expected_conflict": null,
+    "note": "The example follows the rule exactly; easy to mistake for a contradiction.",
+    "requirements": {
+      "R1": "An invoice is flagged 'Overdue' when its status is 'Sent' and the current date is after its due date.",
+      "R2": "Overdue evaluation runs every night at 01:00.",
+      "R3": "Example: an invoice due on 5 May is still 'Sent' on 6 May; the 01:00 run on 6 May flags it 'Overdue'."
     }
   }
 ]

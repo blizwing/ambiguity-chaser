@@ -16,6 +16,10 @@ from dataclasses import dataclass, field
 from graph import _call_validated
 from schemas import ConsistencyReport, ground_conflicts
 
+# Reasoning model: hidden reasoning tokens share max_tokens, and comparing a whole
+# set uses more of them than scoring one requirement (2048 truncated in testing).
+CONSISTENCY_MAX_TOKENS = 4096
+
 with open("prompts/consistency_check_v1.txt", mode="r", encoding="utf-8") as f:
     CONSISTENCY_PROMPT = f.read()
 
@@ -46,7 +50,7 @@ def check_consistency(requirements: dict[str, str]) -> ConsistencyResult:
 
     listing = "\n".join(f"[{rid}] {text}" for rid, text in requirements.items())
     report, errors, attempts, _ = _call_validated(
-        CONSISTENCY_PROMPT.format(requirements=listing), ConsistencyReport
+        CONSISTENCY_PROMPT.format(requirements=listing), ConsistencyReport, max_tokens=CONSISTENCY_MAX_TOKENS
     )
     if report is None:
         return ConsistencyResult(

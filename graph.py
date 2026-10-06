@@ -81,7 +81,7 @@ def _fold_in_clarifications(requirement: str, answers: list[str]) -> str:
     return f"{requirement}\n{lines}" if answers else requirement
 
 
-def _call_validated(prompt: str, model: type[BaseModel], check=None, soft_check=None):
+def _call_validated(prompt: str, model: type[BaseModel], check=None, soft_check=None, max_tokens: int = MAX_TOKENS):
     """Call the model and validate, with one bounded repair attempt.
 
     Shared mechanic only; what a node does when this gives up differs by
@@ -101,7 +101,6 @@ def _call_validated(prompt: str, model: type[BaseModel], check=None, soft_check=
     first usable result is accepted with the message as a warning."""
     errors: list[str] = []
     fallback = None  # (detail, soft problem): usable, but breaks a soft rule
-    max_tokens = MAX_TOKENS
     current = prompt
     for attempt in range(1, MAX_CALL_ATTEMPTS + 1):
         result = call_deepseek_json(current, max_tokens=max_tokens)

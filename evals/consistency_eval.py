@@ -26,9 +26,10 @@ def run_case(case: dict) -> dict:
     result = consistency.check_consistency(case["requirements"])
     found = [sorted(c["req_ids"]) for c in result.conflicts]
     expected = sorted(case["expected_conflict"]) if case["expected_conflict"] else None
+    accepted = [expected] + [sorted(a) for a in case.get("also_accept", [])] if expected else []
     return {
         "status": result.status,
-        "caught": expected in found if expected else None,
+        "caught": any(a in found for a in accepted) if expected else None,
         "alarm": bool(found) if expected is None else None,
         "dropped": sum("dropped" in w for w in result.warnings),
     }
