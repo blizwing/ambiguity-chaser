@@ -82,6 +82,22 @@ Runs on the **DeepSeek API** (`deepseek-flash`, requested explicitly — the
 `deepseek-chat` alias is deprecated and silently reroutes) via the
 OpenAI-compatible SDK, for cost reasons.
 
+## Configuration
+
+Set in `.env` (see `.env.example`); all but the key are optional.
+
+- `DEEPSEEK_API_KEY` — required for DeepSeek. May be left blank only when
+  `DEEPSEEK_OPENAI_BASE_URL` points at a non-DeepSeek server (e.g. local
+  Ollama), where a dummy key is substituted.
+- `DEEPSEEK_OPENAI_BASE_URL` — default `https://api.deepseek.com`.
+- `LLM_MODEL` — default `deepseek-flash`.
+- `AMBIGUITY_CHASER_DB` — checkpoint DB path. Default
+  `%LOCALAPPDATA%\ambiguity-chaser\graph_state.db` (home dir if unset),
+  outside the repo so paused-run state isn't synced by OneDrive.
+
+A pre-commit guard, `scripts/check_no_sensitive.py`, blocks staged ticket
+keys and API-key-looking strings; install steps are in its docstring.
+
 ## Key decisions and why
 
 - **Pydantic `BaseModel` for graph state, not `TypedDict`.** LangGraph
@@ -199,6 +215,7 @@ lives only in `NOTES.md`, keyed by date, never encoded into a filename
   (e.g. a guest-checkout change request).
 - `BACKLOG.md` — deferred ideas, with the condition for revisiting each.
 - `prompts/` — prompt text files, versioned by filename suffix (`_v1`).
+- `scripts/` — repo tooling (pre-commit sensitive-content guard).
 - `scratch/` — throwaway hands-on exercises, not part of the graph.
 - `experiments/` — full standalone write-ups for research spikes (see
   [Experiments](#experiments) above) — self-contained, unlike the
