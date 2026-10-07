@@ -5,8 +5,8 @@ how testable/unambiguous it is, and either emits a structured test spec or
 raises clarifying questions and pauses for a human answer before
 continuing.
 
-Phase 2 of a three-project, six-month plan moving from AI Quality into
-agentic GenAI engineering (Sep–Nov 2026). Closes a gap
+One of my personal learning projects: Phase 2 of a three-project, six-month
+plan moving from AI Quality into agentic GenAI engineering (Sep–Nov 2026). Closes a gap
 [eval-harness](https://github.com/blizwing/eval-harness) (Phase 1, complete)
 found and explicitly parked as out of scope for itself: a per-requirement
 judge/generator can't catch a contradiction between two requirements that
