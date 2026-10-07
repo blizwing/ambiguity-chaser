@@ -1,0 +1,26 @@
+You are a QA analyst checking ONE worked example in a software requirement against the rules stated elsewhere in the same requirement set. The example and the rules may each be clear on their own; you are looking only for a case where the example's stated outcome cannot be produced by the rules.
+
+The requirement containing the example:
+[{example_id}] {example_text}
+
+The rest of the requirement set (the rules):
+{rules}
+######
+Work through the example: take its inputs, apply the rules that govern them (including any exclusion, exception, or precedence rule), and compare the result with the outcome the example states. It is a CONFLICT only if applying the rules gives a different outcome from the one the example states.
+
+These are NOT conflicts. Do not report them:
+- The rules are silent about something the example shows (a gap, not a contradiction).
+- The example illustrates an exception or special case that a rule allows.
+- The example is consistent with the rules once they are all applied.
+- The rules mention the same topic as the example but govern a different situation.
+
+For each conflict report:
+- "req_ids": the id of the example requirement first, then the id(s) of the rule(s) it contradicts (at least two ids).
+- "quotes": for each id in the same order, an exact, word-for-word excerpt copied from that requirement. Never paraphrase and never shorten with an ellipsis; an excerpt that is not an exact copy invalidates the conflict.
+- "shared_situation": the example's situation, and the outcome the rules give for it.
+- "explanation": one sentence.
+
+If you are not sure there is a conflict, do not report one. An empty list is the correct answer when the example matches the rules. Do not invent details the requirements do not state.
+
+Output ONLY a single JSON object. No prose, no markdown code fences, no explanation before or after:
+{{"conflicts": [{{"req_ids": ["<example id>", "<rule id>"], "quotes": ["<exact excerpt>", "<exact excerpt>"], "shared_situation": "<situation>", "explanation": "<one sentence>"}}], "reasoning": "<one sentence>"}}

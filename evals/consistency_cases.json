@@ -250,5 +250,25 @@
       "R2": "Overdue evaluation runs every night at 01:00.",
       "R3": "Example: an invoice due on 5 May is still 'Sent' on 6 May; the 01:00 run on 6 May flags it 'Overdue'."
     }
+  },
+  {
+    "id": "P_two_step_example_vs_rule",
+    "kind": "planted",
+    "expected_conflict": [
+      "R2",
+      "R3"
+    ],
+    "also_accept": [
+      [
+        "R1",
+        "R3"
+      ]
+    ],
+    "requirements": {
+      "R1": "Orders of 100.00 or more qualify for free shipping.",
+      "R2": "Only the amount paid by card counts toward the free-shipping threshold; gift-card payments are excluded from it.",
+      "R3": "Example: a 120.00 order paid entirely with a gift card ships free.",
+      "R4": "Free-shipping orders are dispatched within 2 business days."
+    }
   }
 ]

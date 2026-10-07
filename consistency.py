@@ -11,6 +11,7 @@ Status values (what a caller reads, kept apart from the testability score):
                reported as "checked" on a failure
 """
 
+import re
 from dataclasses import dataclass, field
 
 from graph import _call_validated
@@ -22,6 +23,13 @@ CONSISTENCY_MAX_TOKENS = 4096
 
 with open("prompts/consistency_check_v1.txt", mode="r", encoding="utf-8") as f:
     CONSISTENCY_PROMPT = f.read()
+
+with open("prompts/example_vs_rules_v1.txt", mode="r", encoding="utf-8") as f:
+    EXAMPLE_PROMPT = f.read()
+
+# A requirement "has an example" if it says so. A plain marker match, not a model
+# call: cheap and visible, but it misses an example that never uses these words.
+EXAMPLE_MARKER = re.compile(r"\b(example|e\.g\.|for instance|for example)", re.IGNORECASE)
 
 
 @dataclass
@@ -64,4 +72,49 @@ def check_consistency(requirements: dict[str, str]) -> ConsistencyResult:
         conflicts=[c.model_dump() for c in grounded],
         warnings=warnings,
         call_attempts=attempts,
+    )
+
+
+def check_examples(requirements: dict[str, str]) -> ConsistencyResult:
+    """One call per requirement that contains an example: does the example's
+    stated outcome follow from the rest of the set? Each call reasons over one
+    example, so it stays inside the token budget a whole-set call exhausts.
+
+    Catches only example-versus-rule contradictions; it says nothing about two
+    plain rules that conflict. Status follows check_consistency: a failed call
+    is never reported as checked, so a call failure with no conflict found is
+    not_checked, and one failed call among successes still shows as a warning."""
+    examples = [rid for rid, text in requirements.items() if EXAMPLE_MARKER.search(text)]
+    if not examples or len(requirements) < 2:
+        return ConsistencyResult(status="not_checked", warnings=["no requirement with an example"])
+
+    grounded_all: dict[tuple[str, ...], dict] = {}
+    warnings: list[str] = []
+    attempts = 0
+    failed = 0
+    for rid in examples:
+        rules = "\n".join(f"[{r}] {t}" for r, t in requirements.items() if r != rid)
+        report, errors, n, _ = _call_validated(
+            EXAMPLE_PROMPT.format(example_id=rid, example_text=requirements[rid], rules=rules),
+            ConsistencyReport,
+            max_tokens=CONSISTENCY_MAX_TOKENS,
+        )
+        attempts += n
+        if report is None:
+            failed += 1
+            warnings += [f"[{rid}] check failed: {e}" for e in errors]
+            continue
+        grounded, dropped = ground_conflicts(report, requirements)
+        warnings += [f"[{rid}] dropped ungrounded conflict {c.req_ids}: {why}" for c, why in dropped]
+        for c in grounded:
+            grounded_all.setdefault(tuple(sorted(c.req_ids)), c.model_dump())
+
+    if grounded_all:
+        status = "conflict"
+    else:
+        status = "not_checked" if failed else "checked"
+    if failed and grounded_all:
+        warnings.append(f"{failed} of {len(examples)} example checks failed; the set is only partly checked")
+    return ConsistencyResult(
+        status=status, conflicts=list(grounded_all.values()), warnings=warnings, call_attempts=attempts
     )

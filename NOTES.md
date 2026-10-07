@@ -1458,3 +1458,66 @@ warnings, and none paused to ask a question.
   per-requirement, and what the graph's input unit becomes if so.
 - Not yet tried: feeding the whole spec in as one requirement, to see whether
   the scorer catches the contradictions when the pieces are not split.
+
+---
+
+## Aside — Labelled benchmark and example-versus-rules check (7 Oct 2026) — DRAFT, Pratham to review
+
+**What was built:**
+- `evals/labelled_benchmark.py`: scores a consistency check against a labelled
+  benchmark set (path given by `AMBIGUITY_BENCHMARK`, file outside the repo).
+  Prints only ids and counts, so output is safe to quote as aggregates.
+- `check_examples()` in `consistency.py` plus `prompts/example_vs_rules_v1.txt`:
+  one call per requirement that contains an example, checking the example's
+  stated outcome against the rest of the set. Each call reasons over a single
+  example, so it stays inside the token budget a whole-set call exhausts.
+- One new invented case, `P_two_step_example_vs_rule`: an example that only
+  contradicts a rule once a second (exclusion) rule is applied.
+
+**Scoring had to change before the numbers meant anything.** First version
+counted a catch only when a conflict named exactly the labelled pair. Labelled
+issues span 1 to 5 requirements and a conflict is reported as a set of ids, so
+that rule could never match most of them: the first 0/18 was partly a scorer
+artefact. Now: an issue is caught when a grounded conflict names at least two
+of its requirements and none outside it; a conflict is falsely raised when it
+overlaps no issue by two or more; single-requirement issues are out of scope
+for a cross-requirement check and reported separately.
+
+**Results (3 runs each, one benchmark set of 17 requirements, 5 in-scope
+issues):**
+
+| Check | Caught | Falsely raised | not_checked |
+|---|---|---|---|
+| Whole-set (one call) | 0/15 | 0 | 3/3 |
+| Example-versus-rules | 0/15 | 0 | 2/3 |
+
+- **Whole-set never ran.** Every run hit `finish_reason=length` at 4096, then
+  at 8192 on the retry. `not_checked` is the honest status; 0/15 is "no
+  result", not "missed everything".
+- **Example check ran in 1 of 3 runs and caught nothing.** `not_checked` was
+  1/3 in an earlier run and 2/3 later, so completion itself is unstable.
+- **Example coverage is narrow.** Only 2 of the 17 requirements carry an
+  example marker, and only 2 of the 5 in-scope issues involve one. The other
+  three cannot be reached by this approach at all.
+- **An earlier run raised one conflict that matched no exact pair.** Under the
+  overlap rule it is not "falsely raised" (it overlaps a labelled issue) but it
+  is not a catch either, since it names a requirement outside that issue. Not
+  yet inspected whether it was a correct partial finding.
+
+**Invented cases (3 runs each, example check):** `H1_example_outside_rule`
+3/3, `P_two_step_example_vs_rule` 2/3 (once `checked`), `H8_consistent_example`
+no false alarm 3/3. `H3_precedence_vs_example` found a conflict every run but
+named R1/R4 where the case expects R3/R4: either the case needs an
+`also_accept` or the check names the wrong rule. Undecided.
+
+**What this shows:** passing the invented set overstated the check. On the
+benchmark set the whole-set approach cannot complete, and the example-only
+approach is both unstable and structurally limited to a minority of issues.
+
+**Open / next (Pratham's call):**
+- Option (b): extract trigger/condition/outcome per requirement in small
+  calls, then compare the structured rules. Addresses the size problem and the
+  rule-versus-rule issues. Planned for next session.
+- Decide the `H3` expected pair.
+- The example detector is a regex on "example / e.g. / for instance"; an
+  example written without those words is invisible to it.
