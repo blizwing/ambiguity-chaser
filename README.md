@@ -13,15 +13,18 @@ judge/generator can't catch a contradiction between two requirements that
 are each individually unambiguous. Full three-phase context and the
 complete Phase 1 build log live in that repo.
 
-## Status (as of 6 Oct 2026)
+## Status (as of 12 Oct 2026)
 
 Weeks 6–13 of the roadmap are built and working: the scoring gate,
 human-in-the-loop pause/persist/resume, the re-ask loop with a
 max-iteration guard, a tool-calling coverage check, embedding-based
 retrieval behind it (Week 12), and schema-validated spec emission with a
 shared repair mechanic and a status contract (Week 13). Week 14 (point the
-Phase 1 eval harness at the agent) is next. The test suite (`tests/`, 83
-tests, model calls scripted) runs with `pytest`.
+Phase 1 eval harness at the agent) has not been started. Work since went
+into the set-level consistency check, the gap this project exists to close.
+It passes its invented eval set but **does not yet work on a labelled
+benchmark** (see Known limitations). The test suite (`tests/`, 101 tests,
+model calls scripted) runs with `pytest`.
 
 ## What's built
 
@@ -75,6 +78,18 @@ score_testability <-------------------------+
   verdict only counts if the cited test id is one the search actually
   returned. Bad model output at any step falls through to spec generation:
   a missed duplicate costs less than a requirement dropped by a broken check.
+- **Set-level consistency check** (`consistency.py`) — one call over the
+  whole requirement set asks whether any requirements contradict each
+  other, which per-requirement scoring cannot see. A conflict only counts if
+  both quoted passages appear verbatim in the source; a grounded conflict
+  pauses the run through the same human interrupt. Status is `checked`,
+  `conflict` or `not_checked`, and a failed call is never reported as
+  `checked`. `check_examples()` is a narrower variant: one call per
+  requirement that contains an example, checking the example's outcome
+  against the other requirements.
+- **Per-branch cases** (`branches.py`) — one test case per status or
+  clearance route, with unstated outcomes turned into questions. Built but
+  **not wired into the graph**.
 - Every LLM response is run through `validate_response` (Pydantic), which
   never raises — malformed model output is expected input here, not a bug.
 
@@ -161,6 +176,15 @@ keys and API-key-looking strings; install steps are in its docstring.
   Claude. Only the first tool call is handled (`tool_calls[0]`), and search
   results are folded into a prompt string rather than sent back as a
   `role: "tool"` message.
+- **The consistency check is not yet reliable on real input.** On its
+  invented eval set it caught 50/50 planted conflicts with no false alarms,
+  but those cases were written alongside the prompt. On a labelled benchmark
+  of 17 requirements with 5 in-scope issues (3 runs each), the whole-set call
+  never completed (every run hit the token limit, reported as
+  `not_checked`), and the example-versus-rules check caught 0/15, ran in only
+  1 of 3 runs, and can only reach issues that involve an example. Next
+  planned step: extract trigger/condition/outcome per requirement in small
+  calls, then compare them. See `NOTES.md` and `BACKLOG.md`.
 - **No check that spec values are grounded in the requirement.** A literal
   "number not in the requirement" check flagged 7/18 specs, all benign, so
   it was not built. Planned: an LLM judge measured against hand-labeled
@@ -207,10 +231,13 @@ lives only in `NOTES.md`, keyed by date, never encoded into a filename
 - `retrieval.py` — local embedding search over the corpus.
 - `test_corpus.json` — invented existing test cases the coverage check
   searches.
+- `consistency.py` — set-level contradiction check and its result type.
+- `branches.py` — per-branch test case generation (not wired into the graph).
 - `tests/` — pytest suite (schemas, spec emission, status contract, shared
-  call/repair helper); model calls are scripted.
+  call/repair helper, consistency); model calls are scripted.
 - `evals/` — labeled retrieval queries and the script that reports recall
-  and score distributions.
+  and score distributions; invented consistency cases; and a scorer for a
+  labelled benchmark kept outside the repo.
 - `docs/` — dummy-project source documents for writing test requirements
   (e.g. a guest-checkout change request).
 - `BACKLOG.md` — deferred ideas, with the condition for revisiting each.

@@ -1461,6 +1461,54 @@ warnings, and none paused to ask a question.
 
 ---
 
+## Aside — Set-level consistency check (6 Oct 2026) — DRAFT, Pratham to review
+
+**Why:** the stress run above showed a per-requirement score cannot see a
+contradiction between requirements that are each clear alone. This is the
+check Phase 2 exists to build. Drafted by Claude from the commits and code
+(`0377281`, `a9bac3a`, `1a29e99`) after the fact; Pratham to correct anything
+that misstates what was decided.
+
+**What was built:**
+- `consistency.py`: `check_consistency()` makes one model call over the whole
+  set and returns a `ConsistencyResult` with status `checked` (ran, no
+  grounded conflict), `conflict` (at least one grounded conflict) or
+  `not_checked` (did not run, or output never validated). A failed call is
+  never reported as `checked`. Fewer than two requirements is `not_checked`.
+- **Quote grounding** (`ground_conflicts` in `schemas.py`): a reported
+  conflict only counts if both quoted passages appear verbatim in the source
+  requirements. An ungrounded claim is dropped and recorded as a warning.
+  This applies the fabrication finding from P1 to the checker's own output.
+- **Conflict pause:** the graph has a `raise_conflict` node that routes a
+  grounded conflict through the same `ask_human` interrupt as a low score, so
+  a contradiction pauses for a human rather than producing a spec.
+  `start_run` takes the consistency status and conflicts as input; a lone run
+  is `not_checked`.
+- `branches.py` + `prompts/branches_v1.txt` + `prompts/testcase_v3.txt`:
+  per-branch test cases (one case per status or clearance route). A branch
+  whose outcome the requirement does not state becomes a question, not a
+  guessed case. **Not wired into the graph**; the single-case path stays the
+  default until measured.
+- `evals/consistency_cases.json` + `evals/consistency_eval.py`: invented
+  planted-conflict, near-miss and clean cases. `evals/testcase_prompt_compare.py`
+  compares spec prompt versions.
+- `tests/test_consistency.py` (model calls scripted).
+
+**Token budget:** the check started at 2048 tokens, which truncated, and was
+raised to 4096 (`CONSISTENCY_MAX_TOKENS`) because the model's hidden reasoning
+shares `max_tokens` and comparing a whole set uses more of it than scoring one
+requirement. Same truncation mechanism as the Week 13 finding.
+
+**Results on the invented set** (figures as recorded in `BACKLOG.md`): 50/50
+planted conflicts caught, 0 false alarms in 45 near-miss and clean runs.
+
+**Caveat, found later the same day:** those cases were written alongside the
+prompt, so they overstate it. On a larger, independently labelled set the
+check did not catch a known contradiction; see the 7 Oct aside below and the
+`BACKLOG.md` entry.
+
+---
+
 ## Aside — Labelled benchmark and example-versus-rules check (7 Oct 2026) — DRAFT, Pratham to review
 
 **What was built:**
