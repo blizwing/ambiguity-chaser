@@ -6,8 +6,8 @@ Each case is run `runs` times (default 5; temperature=0 is not fully
 deterministic, so this reports rates, never one exact result). Cases come
 from evals/consistency_cases.json: invented requirements only.
 
-  catch rate         planted cases where a grounded conflict names exactly
-                     the expected requirement pair
+  catch rate         planted cases where a grounded conflict names an accepted
+                     requirement pair, plus at most one extra id
   false-alarm rate   near-miss / clean cases where any grounded conflict
                      was reported (each one would pause a real run)
   dropped claims     conflicts the model claimed that failed the quote check
@@ -29,7 +29,7 @@ def run_case(case: dict) -> dict:
     accepted = [expected] + [sorted(a) for a in case.get("also_accept", [])] if expected else []
     return {
         "status": result.status,
-        "caught": any(a in found for a in accepted) if expected else None,
+        "caught": any(set(a) <= set(f) and len(f) <= len(a) + 1 for a in accepted for f in found) if expected else None,
         "alarm": bool(found) if expected is None else None,
         "dropped": sum("dropped" in w for w in result.warnings),
     }

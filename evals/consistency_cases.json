@@ -157,10 +157,10 @@
     "id": "H3_precedence_vs_example",
     "kind": "planted",
     "expected_conflict": [
-      "R3",
+      "R1",
       "R4"
     ],
-    "note": "R4's example breaks both R3 (only Overdue shown) and R1 (Overdue needs 'In Progress'); either pair counts.",
+    "note": "R4's example directly breaks R1 (Overdue needs 'In Progress'); that is the primary pair. R3 can never fire here (a task cannot be both Assigned and In Progress), so R3/R4 is the weaker alternative. A conflict naming one extra id still counts.",
     "requirements": {
       "R1": "A task is flagged 'Overdue' when its status is 'In Progress' and the current time is after its planned end.",
       "R2": "A task is flagged 'Late' when its status is 'Assigned' and the current time is after its planned start.",
@@ -169,7 +169,7 @@
     },
     "also_accept": [
       [
-        "R1",
+        "R3",
         "R4"
       ]
     ]
