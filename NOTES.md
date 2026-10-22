@@ -1569,3 +1569,86 @@ approach is both unstable and structurally limited to a minority of issues.
 - Decide the `H3` expected pair.
 - The example detector is a regex on "example / e.g. / for instance"; an
   example written without those words is invisible to it.
+
+
+---
+
+## Week 14 — Point the Phase 1 harness at the agent (22 Oct 2026) — DRAFT, Pratham to review
+
+**Objective:** score the agent with the `eval-harness` judge and metrics, as
+pass rates across repeated runs. The 6 Oct entry only did housekeeping; this
+is the harness work itself. Split day: Pratham accepted the measurement design
+below; Claude built the adapter.
+
+**Design (accepted as proposed):**
+- The harness assumes every requirement should yield a test case and scores a
+  missing one as a failure. This agent is built to ask on an ambiguous
+  requirement, so "no spec" cannot count as a failure. Expected route comes
+  from the harness's own labels: `requirement_ambiguous: true` means ask,
+  otherwise emit. Three numbers, never merged: routing accuracy, judge pass
+  rate on emitted specs, and both split by expected group.
+- 3 runs per requirement (the score flipped 100/85 on a clear requirement
+  earlier). A paused run is stopped at the first pause and counted as "asked".
+- Target set before the run: routing accuracy of at least 80%.
+- `evals/harness_adapter.py` (`run`, `report`) and
+  `tests/test_harness_adapter.py` (8 tests, 109 total). The harness is not
+  imported: both repos have a `schemas.py`, so the two sides meet only through
+  JSON files, and the harness scorer runs from its own folder in `--mode
+  judge` (the agent records no per-spec token counts, which assertions need).
+
+**Found while building:** each run needs its own throwaway checkpoint DB.
+`thread_id` is a hash of the requirement text, so in a shared DB a repeat run
+re-executes but inherits the previous run's checkpointed state (probe: a second
+run started with `reask_count` 2 and the earlier answers). My first isolation
+test passed even with the isolation removed; it was rewritten and now fails
+when either the fresh DB or the restore of `graph.DB_PATH` is broken.
+
+**Results (35 requirements x 3 runs = 105 runs, 0 errors, 0 escalations,
+156,596 output tokens):**
+
+| | Result |
+|---|---|
+| Expected ask (9 requirements, 27 runs) | 24/27 = 88.9% asked |
+| Expected emit (26 requirements, 78 runs) | 33/78 = 42.3% emitted, 45 asked |
+| Overall routing | 57/105 = **54.3%** (target 80%: **not met**) |
+| Judge on emitted specs, expected emit | 27/33 = 81.8% good (strict) |
+| Judge on specs emitted where it should have asked | 2/3 good |
+| Requirements whose route changed between runs | 8 of 35 |
+
+One requirement labelled ambiguous (req_29) was emitted in all 3 runs: the
+risky direction, a spec for an ambiguous requirement. The judge figure is not
+comparable to P1's judge numbers (different generator and setup).
+
+**Why it over-asks (diagnosis, not a fix).** Re-scored 3x each: the 11
+requirements asked in all 3 runs and the 7 emitted in all 3.
+- `has_ambiguous_scope` fired in 30 of 33 asked runs (3 of 21 on the emitted
+  group). It was the only flag in 13 runs, which score 85, one under the 86
+  threshold. Three more runs fell to 85 on vague language alone (req_34).
+- The emitted group had no flag at all in 18 of 21 runs.
+- Counterfactual, these 11 requirements only: tolerating one soft flag would
+  clear 16 of the 33 runs. Not tested on the 9 should-ask requirements.
+- The prompt defines scope as "could the expected outcome reasonably be read
+  more than one way?", which is broad, and the scorer's reasons are often
+  defensible (e.g. "reflected in" a section could mean display, deduction or
+  unit conversion; "working" has no measurable definition).
+- All 11 have `requirement_ambiguous: false`, but the harness's human `label`
+  describes the generated test case, not the requirement. So part of the gap
+  is two definitions of "ambiguous", not the agent being wrong.
+
+**Caveats:** the re-score is not the original run (one requirement scored 85,
+70 and 0 across three re-scores), so it shows a tendency, not the exact flags
+behind each original ask. The 18 requirements were chosen by outcome, so the
+percentages do not generalise. One labelled set, 9 ambiguous requirements.
+
+**Decision (proposed, Pratham to confirm):** report the result as it is, with
+the threshold miss stated plainly, and treat the 80% target as measuring a
+mismatch between the gate and the human labels as much as agent quality. The
+86 threshold is unchanged. Tightening the scope wording is parked in
+`BACKLOG.md`, not done.
+
+**Open:**
+- Confirm the decision above.
+- Raw rows and scores are in `private/harness_run/` (gitignored); only these
+  aggregates belong in git.
+- The Week 14 DONE WHEN (a recorded pass rate, repeated across runs, with the
+  run committed) is met once this entry and the adapter are committed.

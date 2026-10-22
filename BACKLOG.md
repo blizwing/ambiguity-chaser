@@ -63,3 +63,21 @@ into its last week and the roadmap's red flag is redesigning mid-ship; the
 honest result (passes invented cases, fails the labelled benchmark) is
 recorded in README and NOTES instead. Step 2(b) is the first thing to pick
 up if this is revisited.
+
+
+## Scope criterion in the testability prompt is broad (found 22 Oct 2026)
+
+**What it is:** on the eval-harness set, `has_ambiguous_scope` fired in 30 of
+33 runs for requirements the human labels call unambiguous, and was the only
+flag in 13 of them. With the 86 threshold one soft flag means "ask", so the
+agent over-asks (routing 54.3%, expected emit asked 45 of 78 runs).
+
+**Idea:** tighten `prompts/testability_score_v1.txt` so scope fires only when
+the outcome has materially different readings, as a new prompt version, not
+an edit. Measure on the harness set both ways: expected-emit routing must rise
+without the 9 should-ask requirements (esp. req_29, already emitted 3/3)
+starting to emit.
+
+**Revisit:** if the over-asking is judged a defect rather than strictness by
+design. Not started: it is a redesign of something that works, outside
+Week 15.

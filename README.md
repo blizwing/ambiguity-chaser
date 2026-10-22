@@ -20,7 +20,11 @@ human-in-the-loop pause/persist/resume, the re-ask loop with a
 max-iteration guard, a tool-calling coverage check, embedding-based
 retrieval behind it (Week 12), and schema-validated spec emission with a
 shared repair mechanic and a status contract (Week 13). Week 14 (point the
-Phase 1 eval harness at the agent) has not been started. Work since went
+Phase 1 eval harness at the agent) is done, and the result is mixed: on the
+harness's 35 requirements (3 runs each) the agent asked or emitted as
+expected 54.3% of the time against an 80% target, mostly by asking on
+requirements humans labelled unambiguous; specs it did emit were judged good
+81.8% of the time (see Known limitations). Work between went
 into the set-level consistency check, the gap this project exists to close.
 It passes its invented eval set but **does not yet work on a labelled
 benchmark** (see Known limitations). That work is parked, not finished: the
@@ -177,6 +181,17 @@ keys and API-key-looking strings; install steps are in its docstring.
   Keys with no value may be absent from a paused result; read with `.get`.
 
 ## Known limitations / open findings
+
+- **The agent over-asks on the eval-harness set.** Routing accuracy was
+  54.3% (target 80%, not met): 24/27 runs asked correctly on the requirements
+  labelled ambiguous, but only 33/78 emitted on the ones labelled
+  unambiguous. The `has_ambiguous_scope` criterion fired in 30 of 33 runs on
+  the always-asked requirements, usually alone, which scores 85 against the
+  86 threshold. The harness's labels describe the generated test case, not
+  the requirement, so part of the gap is two definitions of "ambiguous". One
+  labelled-ambiguous requirement was emitted in every run. One labelled set,
+  9 ambiguous requirements; the threshold is unchanged. Run with
+  `evals/harness_adapter.py`; details in `NOTES.md` (Week 14).
 
 - **Non-determinism isn't limited to generation.** Running the same
   unchanged clear requirement through the graph 5x produced a different
