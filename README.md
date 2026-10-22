@@ -13,7 +13,7 @@ judge/generator can't catch a contradiction between two requirements that
 are each individually unambiguous. Full three-phase context and the
 complete Phase 1 build log live in that repo.
 
-## Status (as of 12 Oct 2026)
+## Status (as of 22 Oct 2026)
 
 Weeks 6–13 of the roadmap are built and working: the scoring gate,
 human-in-the-loop pause/persist/resume, the re-ask loop with a
@@ -23,8 +23,28 @@ shared repair mechanic and a status contract (Week 13). Week 14 (point the
 Phase 1 eval harness at the agent) has not been started. Work since went
 into the set-level consistency check, the gap this project exists to close.
 It passes its invented eval set but **does not yet work on a labelled
-benchmark** (see Known limitations). The test suite (`tests/`, 101 tests,
-model calls scripted) runs with `pytest`.
+benchmark** (see Known limitations). That work is parked, not finished: the
+next idea (per-requirement rule extraction) is in `BACKLOG.md`. The test
+suite (`tests/`, 101 tests, model calls scripted) runs with `pytest`.
+
+## Quick start
+
+```
+python -m venv .venv
+.venv\Scripts\activate            # Windows; source .venv/bin/activate elsewhere
+pip install -r requirements.txt
+copy .env.example .env            # then set DEEPSEEK_API_KEY
+pytest                            # no API key needed; model calls are scripted
+
+python graph.py start "The system must lock an account after 5 failed logins."
+python graph.py start "The system should be fast."   # low score: pauses with questions
+python graph.py peek   "The system should be fast."   # inspect the paused state
+python graph.py resume "The system should be fast." "Page load under 2s at p95."
+```
+
+A paused run is keyed by a hash of the requirement text, so `peek` and
+`resume` take the same requirement string you started with. Running the
+graph makes real API calls; the tests do not.
 
 ## What's built
 
@@ -184,7 +204,9 @@ keys and API-key-looking strings; install steps are in its docstring.
   `not_checked`), and the example-versus-rules check caught 0/15, ran in only
   1 of 3 runs, and can only reach issues that involve an example. Next
   planned step: extract trigger/condition/outcome per requirement in small
-  calls, then compare them. See `NOTES.md` and `BACKLOG.md`.
+  calls, then compare them, was parked on 22 Oct 2026 rather than built.
+  Treat the consistency check as a demonstrated gap, not a working feature.
+  See `NOTES.md` and `BACKLOG.md`.
 - **No check that spec values are grounded in the requirement.** A literal
   "number not in the requirement" check flagged 7/18 specs, all benign, so
   it was not built. Planned: an LLM judge measured against hand-labeled

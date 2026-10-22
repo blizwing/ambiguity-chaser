@@ -57,3 +57,9 @@ the prompt, so they overstate how well it works on other input.
 
 **Needs from Pratham (judgment):** more labelled sets, ideally with a known
 issue each; whether option (c) is worth trying.
+
+**Status, 22 Oct 2026:** option (b) deliberately not started. Phase 2 is
+into its last week and the roadmap's red flag is redesigning mid-ship; the
+honest result (passes invented cases, fails the labelled benchmark) is
+recorded in README and NOTES instead. Step 2(b) is the first thing to pick
+up if this is revisited.
