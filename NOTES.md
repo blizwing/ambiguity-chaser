@@ -1028,6 +1028,20 @@ separate decision from this session's scope.
 10 "Next steps" items complete); worth Pratham's call on whether to
 delete it or leave it as a record of how this session was resumed.
 
+**Decision, added 22 Nov 2026 (commit `fa0eff7`): Laya is not adopted.** 88%
+is still below the DeepSeek judge's 96-100%, and it was scored against labels
+produced by the very judge it would replace. The agent's open problems
+(routing 54.3%, an unreliable consistency check) are not caused by judge
+speed or cost, so a cheaper judge would not move them. On `main`, the
+`HANDOVER.md` and the raw scratch files listed below were removed (they stay
+on `experiment/laya-scoring`), `laya` came out of `requirements.txt`, and
+`experiments/laya-fine-tuning.md` carries the write-up. The "revisit the
+replace/complement question" and "delete HANDOVER.md or keep it" calls above
+are therefore closed. The Hugging Face push stays undone; the checkpoint is
+local only. A pre-removal audit of tracked files and history found no
+secrets or personal data; the one finding was the author email in commit
+metadata.
+
 **Raw files (this session):** `scratch/finetune_dataset_claude_v1.jsonl`,
 `scratch/finetune_dataset_claude_v2_additions.jsonl` (new, the 31
 gap-targeted examples), `scratch/finetune_holdout_texts.txt`,
@@ -1768,14 +1782,33 @@ variant), 5 runs per case, 20 calls, all valid, model `deepseek-flash`:
 - Two cases, 5 runs each, one model: this shows the injection fix holds, not
   that v2 is better overall. One v1 run flagged 4/5 rather than 5/5, so these
   are tendencies, not rates.
-- Routing accuracy was not re-measured on the harness set, so "v2 leaves the
-  54.3% unchanged" is expected, not shown.
+- Routing was re-measured on the harness set (below). Not re-run: the judge
+  on the emitted specs, so spec quality is not compared v1 against v2.
 - Only two injection phrasings, both in English, both appended at the end of
   the requirement. An injection placed mid-text or worded as a role change
   was not tried.
 
+**Routing re-run on the harness set (same 35 requirements and labels, 3 runs
+each, 105 runs, output in the gitignored `private/harness_run_v2/`):**
+
+| | v1 (22 Oct) | v2 |
+|---|---|---|
+| Overall routing | 57/105 = 54.3% | 58/105 = 55.2% |
+| Expected emit, emitted | 33/78 | 35/78 |
+| Expected ask, asked | 24/27 | 23/27 |
+
+- v2 leaves routing unchanged: +1 run out of 105 is noise. Ten requirements
+  changed their asked-count between the two runs, in both directions (for
+  example `req_31` 0/3 to 2/3, `req_11` 1/3 to 0/3), the same run-to-run
+  non-determinism noted earlier. Differences under about 10 points should not
+  be read as real on this set.
+- Expected-ask requirements that emitted went from 3 to 4 of 27, also within
+  noise. Which requirement it was has not been checked (`req_29` is the one
+  tracked in `BACKLOG.md`).
+- The agent still over-asks (43 of 78 clear-requirement runs asked, against 45
+  before). The guard closes the injection hole; it does not touch accuracy.
+
 **Open (Pratham's calls):**
-- Re-run the harness set on v2 to confirm routing is unchanged.
 - The gate (tolerate one soft flag, or scope as warning-only) is still the
   next lever for over-asking; see `BACKLOG.md`.
 
