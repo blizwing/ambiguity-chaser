@@ -400,16 +400,21 @@ gated off (`PUSH_TO_HF = False`) and was not run.
 
 This reads as a genuinely different conclusion from the earlier zero-shot
 verdict ("against adopting Laya right now") — fine-tuning closed most of
-the gap to the production baseline. Whether to actually replace or
-complement `score_testability` with this checkpoint is a separate decision
-from this experiment's scope, worth revisiting explicitly rather than
-inheriting either verdict by default.
+the gap to the production baseline.
 
-Open threads, not yet resolved:
-- Push decision (Hugging Face Hub, private vs. public).
-- Whether the `experiment/laya-scoring` branch stays as a historical record
-  (the pattern used for `experiment/instructor-scoring`) or gets revisited
-  for adoption.
+**Final decision (22 Nov 2026): not adopted into `ambiguity-chaser`.** 88%
+is still below DeepSeek's 96-100% on the same task, scored against labels
+produced by the very judge it would replace. The agent's open problems
+(routing 54.3%, an unreliable consistency check) are not caused by judge
+speed or cost, so a cheaper judge would not move them. The raw files stay
+only on branch `experiment/laya-scoring` as the historical record (the
+pattern used for `experiment/instructor-scoring`); `main` carries this
+write-up and the `NOTES.md` entries only, and `laya` is no longer in
+`requirements.txt`.
+
+Open threads, not resolved:
+- Push decision (Hugging Face Hub, private vs. public). Moot for this
+  project; the checkpoint stays local and is not in this repo.
 - A possible Round 4 exists in the same shape as Round 2→3: e.g. testing
   whether a mid-point epoch count (10-12) finds a better accuracy/ECE
   balance than either 8 or 15 — not attempted this session, since three

@@ -252,7 +252,10 @@ this repo.
   can a 421M open-weight self-hosted model (Laya) replace the DeepSeek
   judge behind `score_testability`? Zero-shot evaluation, root-cause
   investigation, a dead-end GPU rental provider, and 3 fine-tuning rounds
-  (57% → 88% held-out accuracy). Branch `experiment/laya-scoring`.
+  (57% → 88% held-out accuracy). **Not adopted:** still below the DeepSeek
+  judge (96–100%), and a cheaper judge does not address the routing or
+  consistency gaps above. Raw scripts, data and logs live only on branch
+  `experiment/laya-scoring`, not on `main`.
 
 ## Repo layout
 
