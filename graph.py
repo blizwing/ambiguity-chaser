@@ -66,7 +66,7 @@ class GraphState(BaseModel):
 with open("prompts/testcase_v2.txt", mode="r", encoding="utf-8") as f:
     TESTCASE_PROMPT = f.read()
 
-with open("prompts/testability_score_v1.txt", mode="r", encoding="utf-8") as f:
+with open("prompts/testability_score_v2.txt", mode="r", encoding="utf-8") as f:
     SCORE_PROMPT = f.read()
 
 with open("prompts/clarifying_questions_v1.txt", mode="r", encoding="utf-8") as f:
